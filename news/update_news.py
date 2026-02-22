@@ -1,23 +1,33 @@
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
+import logging
 import re
+import sys
 import time
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urlencode, urljoin
 
 import requests
 from bs4 import BeautifulSoup
 
-FEED_URL = "https://news.blizzard.com/en-us/feed/heroes-of-the-storm"
+BASE_URL = "https://news.blizzard.com"
+LOCALE = "en-us"
+PRODUCT = "heroes-of-the-storm"
+NEWS_API_URL = f"{BASE_URL}/{LOCALE}/api/news/{PRODUCT}"
+FEED_API_URL = f"{BASE_URL}/{LOCALE}/api/feed/{PRODUCT}"
 DEFAULT_DATA_DIR = Path("news") / "articles"
 DEFAULT_INDEX_PATH = Path("news") / "index.json"
 REQUEST_TIMEOUT = 30
 MAX_RETRIES = 3
+DEFAULT_MONTHS = 3
+
+logger = logging.getLogger("hots_update")
 
 
 @dataclass
@@ -66,8 +76,64 @@ class UpdateStats:
     failed: int = 0
 
 
+def configure_logging(verbose: bool = False) -> None:
+    level = logging.DEBUG if verbose else logging.INFO
+    logger.setLevel(level)
+    logger.handlers.clear()
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setLevel(level)
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    logger.addHandler(handler)
+    logger.propagate = False
+
+
+def parse_cli_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Update HOTS news articles")
+    parser.add_argument("--months", type=int, default=DEFAULT_MONTHS, help="lookback window in months")
+    parser.add_argument("--from", dest="from_date", type=str, default=None, help="start date YYYY-MM-DD")
+    parser.add_argument("--to", dest="to_date", type=str, default=None, help="end date YYYY-MM-DD")
+    parser.add_argument("--limit", type=int, default=None, help="max number of candidate articles")
+    parser.add_argument("--verbose", action="store_true", help="enable debug logging")
+    return parser.parse_args()
+
+
+def _now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return _now_utc().isoformat()
+
+
+def _parse_iso_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def _parse_date(value: str) -> datetime:
+    return datetime.strptime(value, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+
+
+def compute_date_window(
+    months: int = DEFAULT_MONTHS,
+    from_date: str | None = None,
+    to_date: str | None = None,
+) -> tuple[datetime, datetime]:
+    if from_date or to_date:
+        end = _parse_date(to_date) if to_date else _now_utc()
+        start = _parse_date(from_date) if from_date else end - timedelta(days=30 * months)
+    else:
+        end = _now_utc()
+        start = end - timedelta(days=30 * months)
+
+    if start > end:
+        raise ValueError("start date must be <= end date")
+
+    return start, end
 
 
 def _extract_news_id(url: str) -> str | None:
@@ -84,61 +150,150 @@ def _request_text(url: str, timeout: int = REQUEST_TIMEOUT) -> str:
             return response.text
         except requests.RequestException as exc:
             last_error = exc
+            logger.warning("request failed (%s/%s) url=%s error=%s", attempt + 1, MAX_RETRIES, url, exc)
             if attempt < MAX_RETRIES - 1:
                 time.sleep(0.5 * (attempt + 1))
     assert last_error is not None
     raise last_error
 
 
-def fetch_feed_html() -> str:
-    return _request_text(FEED_URL)
+def _request_json(url: str, timeout: int = REQUEST_TIMEOUT) -> dict[str, Any]:
+    return json.loads(_request_text(url, timeout=timeout))
 
 
 def fetch_article_html(url: str) -> str:
     return _request_text(url)
 
 
-def parse_feed(html: str, base_url: str = FEED_URL) -> list[ArticleMeta]:
-    soup = BeautifulSoup(html, "html.parser")
+def fetch_news_api_json() -> dict[str, Any]:
+    return _request_json(NEWS_API_URL)
 
-    selectors = {
-        "featured": "blz-news-featured-cards.section-featured-news blz-news.featured-news > blz-news-card",
-        "latest": ".LatestNews .LatestNews-feed blz-news-feed ol.card-list > li > blz-news-card",
-    }
 
-    seen_ids: set[str] = set()
+def fetch_feed_page_json(offset: int = 0, filters: list[str] | None = None) -> dict[str, Any]:
+    params: list[tuple[str, str]] = [("offset", str(offset))]
+    for item in filters or []:
+        params.append(("feedCxpProductIds[]", item))
+    return _request_json(f"{FEED_API_URL}?{urlencode(params)}")
+
+
+def _get_item_properties(group: dict[str, Any]) -> dict[str, Any]:
+    if isinstance(group.get("properties"), dict):
+        return group.get("properties") or {}
+    content_items = group.get("contentItems") or []
+    first = content_items[0] if content_items else {}
+    return first.get("properties") or {}
+
+
+def _to_meta(group: dict[str, Any], section: str) -> ArticleMeta | None:
+    props = _get_item_properties(group)
+    news_path = props.get("newsPath")
+    if not news_path:
+        return None
+
+    url = urljoin(BASE_URL, news_path)
+    news_id = _extract_news_id(url)
+    if not news_id:
+        return None
+
+    static_asset = props.get("staticAsset") or {}
+    return ArticleMeta(
+        news_id=news_id,
+        url=url,
+        title=(props.get("title") or "").strip(),
+        description=(props.get("summary") or "").strip(),
+        section=section,
+        timestamp=props.get("lastUpdated"),
+        image_url=static_asset.get("imageUrl"),
+    )
+
+
+def _extract_featured_groups(news_json: dict[str, Any]) -> list[dict[str, Any]]:
+    sections = news_json.get("sections") or []
+    for section in sections:
+        if section.get("name") == "Featured":
+            return section.get("contentGroups") or []
+    return []
+
+
+def _extract_feed_groups(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    feed = payload.get("feed")
+    if isinstance(feed, dict):
+        return feed.get("contentItems") or []
+    return payload.get("contentItems") or []
+
+
+def discover_all_article_meta(start_dt: datetime | None = None) -> list[ArticleMeta]:
+    seen: set[str] = set()
     results: list[ArticleMeta] = []
 
-    for section, selector in selectors.items():
-        for card in soup.select(selector):
-            href = card.get("href")
-            if not href:
-                continue
+    root = fetch_news_api_json()
 
-            url = urljoin(base_url, href)
-            news_id = _extract_news_id(url)
-            if not news_id or news_id in seen_ids:
-                continue
+    for group in _extract_featured_groups(root):
+        meta = _to_meta(group, "featured")
+        if meta and meta.news_id not in seen:
+            seen.add(meta.news_id)
+            results.append(meta)
 
-            title_el = card.select_one("h1[slot='heading']")
-            description_el = card.select_one("p[slot='description']")
-            timestamp_el = card.select_one("blz-timestamp[slot='metadata']")
-            image_el = card.select_one("blz-image[slot='image']")
+    for group in _extract_feed_groups(root):
+        meta = _to_meta(group, "latest")
+        if meta and meta.news_id not in seen:
+            seen.add(meta.news_id)
+            results.append(meta)
 
-            seen_ids.add(news_id)
-            results.append(
-                ArticleMeta(
-                    news_id=news_id,
-                    url=url,
-                    title=title_el.get_text(strip=True) if title_el else "",
-                    description=description_el.get_text(strip=True) if description_el else "",
-                    section=section,
-                    timestamp=timestamp_el.get("timestamp") if timestamp_el else None,
-                    image_url=urljoin(base_url, image_el.get("src")) if image_el and image_el.get("src") else None,
-                )
-            )
+    feed_state = root.get("feed") or {}
+    pagination = feed_state.get("pagination") or {}
+    offset = pagination.get("offset", 0)
+    limit = pagination.get("limit", 0)
+    has_next = bool(pagination.get("hasNextPage"))
+    pages = 1
 
+    while has_next:
+        offset = offset + limit
+        page = fetch_feed_page_json(offset=offset)
+        pages += 1
+        page_has_in_range_item = False
+        for group in _extract_feed_groups(page):
+            meta = _to_meta(group, "latest")
+            if meta and meta.news_id not in seen:
+                seen.add(meta.news_id)
+                results.append(meta)
+            if start_dt is not None and meta is not None:
+                ts = _parse_iso_datetime(meta.timestamp)
+                if ts is not None and ts >= start_dt:
+                    page_has_in_range_item = True
+
+        page_pagination = page.get("pagination") or {}
+        offset = page_pagination.get("offset", offset)
+        limit = page_pagination.get("limit", limit)
+        has_next = bool(page_pagination.get("hasNextPage"))
+        if start_dt is not None and not page_has_in_range_item:
+            logger.info("pagination stopped early at page=%s (older than start date)", pages)
+            break
+
+    logger.info("discovery finished pages=%s candidates=%s", pages, len(results))
     return results
+
+
+def filter_meta_by_date_range(meta_items: list[ArticleMeta], start_dt: datetime, end_dt: datetime) -> list[ArticleMeta]:
+    filtered: list[ArticleMeta] = []
+    skipped_invalid = 0
+    for item in meta_items:
+        ts = _parse_iso_datetime(item.timestamp)
+        if ts is None:
+            skipped_invalid += 1
+            logger.warning("skip article with invalid timestamp news_id=%s timestamp=%s", item.news_id, item.timestamp)
+            continue
+        if start_dt <= ts <= end_dt:
+            filtered.append(item)
+
+    logger.info(
+        "date filter applied start=%s end=%s kept=%s skipped_invalid=%s",
+        start_dt.isoformat(),
+        end_dt.isoformat(),
+        len(filtered),
+        skipped_invalid,
+    )
+    return filtered
 
 
 def parse_article(html: str, url: str) -> ArticleDetail:
@@ -160,7 +315,6 @@ def parse_article(html: str, url: str) -> ArticleDetail:
 
     author_el = root.select_one(".details .author")
     timestamp_el = root.select_one("blz-timestamp[timestamp]")
-    # Blizzard pages often have only one canonical update moment on this element.
     updated_at = timestamp_el.get("timestamp") if timestamp_el else None
     header_image = root.select_one("header.ContentHeader > blz-image[src]")
 
@@ -211,9 +365,18 @@ def merge_updates(index: dict[str, Any], updated_articles: list[dict[str, Any]])
     }
 
 
+def build_article_output_path(record: ArticleRecord, base_dir: Path = DEFAULT_DATA_DIR) -> Path:
+    for candidate in (record.timestamp, record.updated_at, record.published_at, record.fetched_at):
+        dt = _parse_iso_datetime(candidate)
+        if dt is not None:
+            return base_dir / f"{dt.year:04d}" / f"{dt.month:02d}" / f"{dt.day:02d}" / f"{record.news_id}.json"
+    now = _now_utc()
+    return base_dir / f"{now.year:04d}" / f"{now.month:02d}" / f"{now.day:02d}" / f"{record.news_id}.json"
+
+
 def write_article(record: ArticleRecord, dir_path: Path = DEFAULT_DATA_DIR) -> Path:
-    dir_path.mkdir(parents=True, exist_ok=True)
-    path = dir_path / f"{record.news_id}.json"
+    path = build_article_output_path(record, dir_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(asdict(record), ensure_ascii=False, indent=2), encoding="utf-8")
     return path
 
@@ -239,19 +402,26 @@ def update_news(
     limit: int | None = None,
     index_path: Path = DEFAULT_INDEX_PATH,
     article_dir: Path = DEFAULT_DATA_DIR,
+    start_dt: datetime | None = None,
+    end_dt: datetime | None = None,
 ) -> UpdateStats:
     stats = UpdateStats()
     index = load_index(index_path)
     existing = {item["news_id"]: item for item in index.get("articles", [])}
 
-    feed_html = fetch_feed_html()
-    candidates = parse_feed(feed_html)
+    logger.info("starting update index=%s article_dir=%s", index_path, article_dir)
+
+    candidates = discover_all_article_meta(start_dt=start_dt)
+    if start_dt is not None and end_dt is not None:
+        candidates = filter_meta_by_date_range(candidates, start_dt, end_dt)
+
     if limit is not None:
         candidates = candidates[:limit]
+        logger.info("limit applied candidates=%s", len(candidates))
 
     changed_index_items: list[dict[str, Any]] = []
 
-    for meta in candidates:
+    for i, meta in enumerate(candidates, start=1):
         existing_item = existing.get(meta.news_id)
         if existing_item and existing_item.get("timestamp") == meta.timestamp:
             stats.unchanged += 1
@@ -266,16 +436,36 @@ def update_news(
 
             if existing_item:
                 stats.updated += 1
+                logger.info("[%s/%s] updated news_id=%s", i, len(candidates), meta.news_id)
             else:
                 stats.new += 1
-        except Exception:
+                logger.info("[%s/%s] new news_id=%s", i, len(candidates), meta.news_id)
+        except Exception as exc:
             stats.failed += 1
+            logger.error("[%s/%s] failed news_id=%s url=%s error=%s", i, len(candidates), meta.news_id, meta.url, exc)
 
     merged = merge_updates(index, changed_index_items)
     write_index(merged, index_path)
+
+    logger.info(
+        "update finished new=%s updated=%s unchanged=%s failed=%s total_index=%s",
+        stats.new,
+        stats.updated,
+        stats.unchanged,
+        stats.failed,
+        merged.get("count", 0),
+    )
     return stats
 
 
-if __name__ == "__main__":
-    result = update_news()
+def main() -> None:
+    args = parse_cli_args()
+    configure_logging(verbose=args.verbose)
+
+    start_dt, end_dt = compute_date_window(months=args.months, from_date=args.from_date, to_date=args.to_date)
+    result = update_news(limit=args.limit, start_dt=start_dt, end_dt=end_dt)
     print(json.dumps(asdict(result), indent=2))
+
+
+if __name__ == "__main__":
+    main()

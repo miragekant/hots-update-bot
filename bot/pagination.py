@@ -5,7 +5,7 @@ from typing import Any
 
 import discord
 
-from bot.message import format_article_body_embed_pages, format_article_embed, format_news_list_embed
+from bot.message import HeroPageTarget, format_article_body_embed_pages, format_article_embed, format_news_list_embed
 from bot.repository import NewsRepository
 
 
@@ -137,6 +137,61 @@ class EmbedPaginationView(discord.ui.View):
 
     async def _on_next(self, interaction: discord.Interaction) -> None:
         self.page = min(self.total_pages, self.page + 1)
+        self._refresh_components()
+        await interaction.response.edit_message(embed=self.current_embed(), view=self)
+
+
+class HeroPageButton(discord.ui.Button["HeroPaginationView"]):
+    def __init__(self, *, target: HeroPageTarget, row: int) -> None:
+        super().__init__(label=target.label[:80], style=discord.ButtonStyle.secondary, row=row)
+        self.target = target
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        assert self.view is not None
+        await self.view.show_page(interaction, self.target.page_index)
+
+
+class HeroPaginationView(discord.ui.View):
+    def __init__(
+        self,
+        *,
+        embeds: list[discord.Embed],
+        page_targets: list[HeroPageTarget],
+        requesting_user_id: int | None,
+        timeout: float = 300,
+    ) -> None:
+        super().__init__(timeout=timeout)
+        self.embeds = embeds or [discord.Embed(description="_No content available._")]
+        self.page_targets = page_targets or [HeroPageTarget(label="Summary", page_index=0)]
+        self.requesting_user_id = requesting_user_id
+        self.page_index = 0
+
+        if len(self.page_targets) > 25:
+            raise ValueError("hero pagination supports at most 25 page targets")
+
+        self.page_buttons: list[HeroPageButton] = []
+        for idx, target in enumerate(self.page_targets):
+            button = HeroPageButton(target=target, row=idx // 5)
+            self.page_buttons.append(button)
+            self.add_item(button)
+
+        self._refresh_components()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if self.requesting_user_id is None or interaction.user.id == self.requesting_user_id:
+            return True
+        await interaction.response.send_message("Only the original requester can use these controls.", ephemeral=True)
+        return False
+
+    def current_embed(self) -> discord.Embed:
+        return self.embeds[self.page_index]
+
+    def _refresh_components(self) -> None:
+        for button in self.page_buttons:
+            button.disabled = button.target.page_index == self.page_index
+
+    async def show_page(self, interaction: discord.Interaction, page_index: int) -> None:
+        self.page_index = min(max(page_index, 0), len(self.embeds) - 1)
         self._refresh_components()
         await interaction.response.edit_message(embed=self.current_embed(), view=self)
 

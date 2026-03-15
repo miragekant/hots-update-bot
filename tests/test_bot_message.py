@@ -111,6 +111,34 @@ def test_format_hero_embeds_includes_summary_and_talent_pages():
     assert "Pressurized Glands" in (embeds[1].description or "")
 
 
+def test_format_hero_pages_returns_verbose_targets_for_overflow():
+    hero = {
+        "name": "Abathur",
+        "role": "Specialist",
+        "new_role": "Support",
+        "type": "Melee",
+    }
+    talents = {
+        "levels": ["1", "4"],
+        "talents_by_level": {
+            "1": [
+                {"title": "Talent A", "description": ("alpha " * 1200).strip(), "hotkey": "Q"},
+                {"title": "Talent B", "description": ("beta " * 1200).strip(), "hotkey": "W"},
+            ],
+            "4": [{"title": "Talent C", "description": "Short description.", "hotkey": "E"}],
+        },
+    }
+
+    embeds, page_targets = message.format_hero_pages(hero, talents)
+
+    assert embeds[0].footer.text == "HeroesProfile • Summary"
+    assert page_targets[0].label == "Summary"
+    assert page_targets[1].label.startswith("Level 1 (1/")
+    assert any(target.label.startswith("Level 1 (2/") for target in page_targets)
+    assert page_targets[-1].label == "Level 4"
+    assert page_targets[-1].page_index == len(embeds) - 1
+
+
 def test_format_patch_embeds_marks_matched_build():
     embeds = message.format_patch_embeds(
         {

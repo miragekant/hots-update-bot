@@ -78,7 +78,7 @@ Behavior:
 - `/latest` shows latest local article in a rich embed with Prev/Next buttons for article pages.
 - `/news` shows paginated local list (5 per page), optional `year` filter, and interactive article selection.
 - Selecting an article opens a rich embed with button-based page navigation.
-- `/hero` reads cached HeroesProfile hero + talent data and shows paginated embeds.
+- `/hero` reads cached HeroesProfile hero + talent data and shows direct buttons for `Summary` and each talent tier page.
 - `/map` reads cached HeroesProfile map data.
 - `/patch` reads cached HeroesProfile patch-family data, including full build lookups.
 - Daily job runs at configured UTC time, updates local cache, and posts update summary + newest article when changes exist.

@@ -17,8 +17,8 @@ if __package__ is None or __package__ == "":
 
 from bot.config import BotConfig, load_config
 from bot.heroesprofile_repository import HeroesProfileRepository
-from bot.message import format_article_body_embed_pages, format_hero_embeds, format_map_embed, format_patch_embeds
-from bot.pagination import ArticlePaginationView, EmbedPaginationView, NewsPaginationView
+from bot.message import format_article_body_embed_pages, format_hero_pages, format_map_embed, format_patch_embeds
+from bot.pagination import ArticlePaginationView, EmbedPaginationView, HeroPaginationView, NewsPaginationView
 from bot.repository import NewsRepository
 from heroesprofile.update_data import configure_logging as configure_heroesprofile_logging
 from news.update_news import configure_logging as configure_updater_logging
@@ -163,8 +163,8 @@ def build_client(config: BotConfig) -> HotsClient:
             )
             return
 
-        embeds = format_hero_embeds(hero_record, repo.get_hero_talents(str(hero_record.get("slug") or "")))
-        view = EmbedPaginationView(embeds=embeds, requesting_user_id=interaction.user.id)
+        embeds, page_targets = format_hero_pages(hero_record, repo.get_hero_talents(str(hero_record.get("slug") or "")))
+        view = HeroPaginationView(embeds=embeds, page_targets=page_targets, requesting_user_id=interaction.user.id)
         await interaction.response.send_message(embed=view.current_embed(), view=view)
 
     @client.tree.command(name="map", description="Show a HOTS map from cached HeroesProfile data")

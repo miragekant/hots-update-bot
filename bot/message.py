@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -10,6 +11,12 @@ from bs4.element import NavigableString, Tag
 
 MAX_SAFE_MESSAGE_CHARS = 1900
 MAX_EMBED_DESCRIPTION_CHARS = 3500
+
+
+@dataclass(frozen=True)
+class HeroPageTarget:
+    label: str
+    page_index: int
 
 
 def _parse_iso_datetime(value: str | None) -> datetime | None:
@@ -385,7 +392,10 @@ def format_patch_embeds(patch_record: dict[str, Any]) -> list[discord.Embed]:
     return embeds
 
 
-def format_hero_embeds(hero_record: dict[str, Any], talent_payload: dict[str, Any] | None) -> list[discord.Embed]:
+def format_hero_pages(
+    hero_record: dict[str, Any],
+    talent_payload: dict[str, Any] | None,
+) -> tuple[list[discord.Embed], list[HeroPageTarget]]:
     title = _format_field_value(hero_record.get("name"), "Unknown Hero")
     summary = discord.Embed(title=title, description=f"Role: {_format_field_value(hero_record.get('new_role') or hero_record.get('role'))}")
     summary.add_field(name="Role", value=_format_field_value(hero_record.get("role")), inline=True)
@@ -401,15 +411,15 @@ def format_hero_embeds(hero_record: dict[str, Any], talent_payload: dict[str, An
     aliases = [str(value) for value in hero_record.get("aliases") or [] if str(value).strip()]
     if aliases:
         summary.add_field(name="Aliases", value=", ".join(aliases[:10])[:1024], inline=False)
-    summary.set_footer(text="HeroesProfile • Page 1")
+    summary.set_footer(text="HeroesProfile • Summary")
 
     embeds = [summary]
+    page_targets = [HeroPageTarget(label="Summary", page_index=0)]
     if not talent_payload:
-        return embeds
+        return embeds, page_targets
 
     levels = [str(level) for level in talent_payload.get("levels") or []]
     talents_by_level = talent_payload.get("talents_by_level") or {}
-    page_number = 2
     for level in levels:
         talents = talents_by_level.get(level) or []
         lines: list[str] = []
@@ -424,8 +434,13 @@ def format_hero_embeds(hero_record: dict[str, Any], talent_payload: dict[str, An
         pages = split_markdown_chunks("\n\n".join(lines) or "_No talents available._", max_chars=MAX_EMBED_DESCRIPTION_CHARS)
         for page_idx, text in enumerate(pages, start=1):
             embed = discord.Embed(title=f"{title} Talents - Level {level}", description=text)
-            suffix = f" ({page_idx}/{len(pages)})" if len(pages) > 1 else ""
-            embed.set_footer(text=f"HeroesProfile • Page {page_number} • Level {level}{suffix}")
+            label_suffix = f" ({page_idx}/{len(pages)})" if len(pages) > 1 else ""
+            embed.set_footer(text=f"HeroesProfile • Level {level}{label_suffix}")
             embeds.append(embed)
-            page_number += 1
+            page_targets.append(HeroPageTarget(label=f"Level {level}{label_suffix}", page_index=len(embeds) - 1))
+    return embeds, page_targets
+
+
+def format_hero_embeds(hero_record: dict[str, Any], talent_payload: dict[str, Any] | None) -> list[discord.Embed]:
+    embeds, _page_targets = format_hero_pages(hero_record, talent_payload)
     return embeds

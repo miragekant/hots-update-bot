@@ -13,6 +13,7 @@ Local HOTS news crawler plus Discord bot for browsing cached articles.
   - `/hero name:<required>`
   - `/map name:<required>`
   - `/patch version:<required>`
+  - `/talentbuilder`
 - Runs a daily non-blocking update loop inside the bot process.
 
 ## Data Output
@@ -81,6 +82,7 @@ Behavior:
 - `/hero` reads cached HeroesProfile hero + talent data and shows direct buttons for `Summary` and each talent tier page.
 - `/map` reads cached HeroesProfile map data.
 - `/patch` reads cached HeroesProfile patch-family data, including full build lookups.
+- `/talentbuilder` opens an ephemeral, cache-only builder for choosing a hero, selecting talents tier by tier, revising prior tiers, optionally naming the build, and exporting a HOTS talent string in a copy-friendly code block.
 - Daily job runs at configured UTC time, updates local cache, and posts update summary + newest article when changes exist.
 - Command responses read from local files only (no fetch on user read request).
 - Article body rendering maps HTML structure (headings/lists/quotes/code/links) to compact Discord markdown.

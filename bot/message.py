@@ -19,6 +19,14 @@ class HeroPageTarget:
     page_index: int
 
 
+@dataclass(frozen=True)
+class TalentBuilderTierOption:
+    index: int
+    title: str
+    description: str
+    hotkey: str = ""
+
+
 def _parse_iso_datetime(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -444,3 +452,75 @@ def format_hero_pages(
 def format_hero_embeds(hero_record: dict[str, Any], talent_payload: dict[str, Any] | None) -> list[discord.Embed]:
     embeds, _page_targets = format_hero_pages(hero_record, talent_payload)
     return embeds
+
+
+def format_talent_builder_embed(
+    *,
+    hero_name: str,
+    selections: dict[str, int],
+    tier_options: dict[str, list[TalentBuilderTierOption]],
+    active_level: str,
+) -> discord.Embed:
+    embed = discord.Embed(
+        title=f"Talent Builder - {hero_name}",
+        description="Select a tier to edit, pick a talent, or leave a tier open with `Any talent`.",
+    )
+
+    summary_lines: list[str] = []
+    for level in ("1", "4", "7", "10", "13", "16", "20"):
+        picked = int(selections.get(level, 0) or 0)
+        options = tier_options.get(level) or []
+        if picked <= 0:
+            label = "Any talent"
+        else:
+            match = next((option for option in options if option.index == picked), None)
+            label = match.title if match is not None else f"Option {picked}"
+        marker = " <- editing" if level == active_level else ""
+        summary_lines.append(f"Level {level}: {label}{marker}")
+    embed.add_field(name="Current Build", value="\n".join(summary_lines), inline=False)
+
+    active_lines: list[str] = []
+    for option in tier_options.get(active_level) or []:
+        prefix = f"`{option.index}`"
+        hotkey = f" `{option.hotkey}`" if option.hotkey else ""
+        line = f"{prefix}{hotkey} **{option.title}**"
+        if option.description:
+            line = f"{line}\n{option.description}"
+        active_lines.append(line)
+    embed.add_field(
+        name=f"Level {active_level} Options",
+        value="\n\n".join(active_lines)[:1024] if active_lines else "_No talents available._",
+        inline=False,
+    )
+    embed.set_footer(text=f"Talent Builder • Editing Level {active_level}")
+    return embed
+
+
+def format_talent_build_result(
+    *,
+    hero_name: str,
+    build_name: str | None,
+    talent_string: str,
+    selections: dict[str, int],
+    tier_options: dict[str, list[TalentBuilderTierOption]],
+) -> tuple[discord.Embed, str]:
+    title = f"{hero_name} Build"
+    if build_name:
+        title = f"{title} - {build_name}"
+    embed = discord.Embed(title=title, description="Exported HOTS talent build.")
+
+    lines: list[str] = []
+    for level in ("1", "4", "7", "10", "13", "16", "20"):
+        picked = int(selections.get(level, 0) or 0)
+        options = tier_options.get(level) or []
+        if picked <= 0:
+            label = "Any talent"
+        else:
+            match = next((option for option in options if option.index == picked), None)
+            label = match.title if match is not None else f"Option {picked}"
+        lines.append(f"Level {level}: {label}")
+    embed.add_field(name="Selections", value="\n".join(lines), inline=False)
+    if build_name:
+        embed.add_field(name="Build Name", value=build_name, inline=False)
+    embed.set_footer(text="Talent Builder • Export")
+    return embed, f"```text\n{talent_string}\n```"

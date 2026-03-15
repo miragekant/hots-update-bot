@@ -20,6 +20,7 @@ from bot.heroesprofile_repository import HeroesProfileRepository
 from bot.message import format_article_body_embed_pages, format_hero_pages, format_map_embed, format_patch_embeds
 from bot.pagination import ArticlePaginationView, EmbedPaginationView, HeroPaginationView, NewsPaginationView
 from bot.repository import NewsRepository
+from bot.talent_builder_view import create_talent_builder_entry
 from heroesprofile.update_data import configure_logging as configure_heroesprofile_logging
 from news.update_news import configure_logging as configure_updater_logging
 from news.update_news import update_news
@@ -111,6 +112,21 @@ class HotsClient(discord.Client):
 def build_client(config: BotConfig) -> HotsClient:
     client = HotsClient(config)
 
+    async def talentbuilder_hero_autocomplete(
+        interaction: discord.Interaction,
+        current: str,
+    ) -> list[app_commands.Choice[str]]:
+        marker = current.strip().lower()
+        results: list[app_commands.Choice[str]] = []
+        for hero in client.heroesprofile_repository.list_talent_build_heroes():
+            search_terms = (hero.name.lower(), hero.slug.lower(), hero.export_token.lower())
+            if marker and not any(marker in term for term in search_terms):
+                continue
+            results.append(app_commands.Choice(name=hero.name[:100], value=hero.name))
+            if len(results) >= 25:
+                break
+        return results
+
     @client.tree.command(name="hello", description="Say hi to the bot!")
     async def hello(interaction: discord.Interaction) -> None:
         await interaction.response.send_message(f"Hey {interaction.user.mention}! I'm alive.")
@@ -194,6 +210,32 @@ def build_client(config: BotConfig) -> HotsClient:
         embeds = format_patch_embeds(patch_record)
         view = EmbedPaginationView(embeds=embeds, requesting_user_id=interaction.user.id)
         await interaction.response.send_message(embed=view.current_embed(), view=view)
+
+    @client.tree.command(name="talentbuilder", description="Create and export a HOTS talent build from local cache")
+    @app_commands.describe(hero="Optional hero to start with immediately")
+    @app_commands.autocomplete(hero=talentbuilder_hero_autocomplete)
+    async def talentbuilder(interaction: discord.Interaction, hero: str | None = None) -> None:
+        repo = client.heroesprofile_repository
+        if not repo.has_data():
+            await interaction.response.send_message(
+                "Hero data is not available in local cache. Run `python heroesprofile/update_data.py` first.",
+                ephemeral=True,
+            )
+            return
+
+        heroes = repo.list_talent_builder_heroes()
+        if not heroes:
+            await interaction.response.send_message(
+                "No local hero talent data is available. Run `python heroesprofile/update_data.py --only heroes,talents` first.",
+                ephemeral=True,
+            )
+            return
+        await create_talent_builder_entry(
+            interaction=interaction,
+            repository=repo,
+            requesting_user_id=interaction.user.id,
+            hero_name=hero,
+        )
 
     return client
 

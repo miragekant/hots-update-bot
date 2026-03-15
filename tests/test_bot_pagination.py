@@ -1,6 +1,8 @@
 import asyncio
 
-from bot.pagination import ArticlePaginationView, build_article_page_embed, compute_total_pages, page_slice
+import discord
+
+from bot.pagination import ArticlePaginationView, EmbedPaginationView, build_article_page_embed, compute_total_pages, page_slice
 
 
 def test_compute_total_pages():
@@ -39,3 +41,20 @@ def test_build_article_page_embed_uses_page_text():
     embed = build_article_page_embed(article, "Body page content", page=1, total_pages=3)
     assert embed.description == "Body page content"
     assert embed.footer.text == "Page 1/3"
+
+
+def test_embed_pagination_view_button_state():
+    async def _run() -> None:
+        embeds = [discord.Embed(title="One"), discord.Embed(title="Two")]
+        view = EmbedPaginationView(embeds=embeds, requesting_user_id=123)
+        assert view.prev_button.disabled is True
+        assert view.next_button.disabled is False
+        assert view.current_embed().title == "One"
+
+        view.page = 2
+        view._refresh_components()
+        assert view.prev_button.disabled is False
+        assert view.next_button.disabled is True
+        assert view.current_embed().title == "Two"
+
+    asyncio.run(_run())

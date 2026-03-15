@@ -323,3 +323,109 @@ def format_news_list_embed(items: list[dict[str, Any]], page: int, total_pages: 
 
     embed.set_footer(text=f"Page {page}/{total_pages}")
     return embed
+
+
+def build_embed_pages(
+    *,
+    title: str,
+    page_texts: list[str],
+    url: str | None = None,
+    color: int | None = None,
+    footer_prefix: str | None = None,
+) -> list[discord.Embed]:
+    if not page_texts:
+        page_texts = ["_No content available._"]
+
+    embeds: list[discord.Embed] = []
+    total_pages = len(page_texts)
+    for page, text in enumerate(page_texts, start=1):
+        embed = discord.Embed(title=title, url=url, description=text or "_No content available._", color=color)
+        footer = f"Page {page}/{total_pages}"
+        if footer_prefix:
+            footer = f"{footer_prefix} • {footer}"
+        embed.set_footer(text=footer)
+        embeds.append(embed)
+    return embeds
+
+
+def _format_field_value(value: Any, fallback: str = "Unknown") -> str:
+    text = str(value or "").strip()
+    return text if text else fallback
+
+
+def format_map_embed(map_record: dict[str, Any]) -> discord.Embed:
+    name = _format_field_value(map_record.get("name"), "Unknown Map")
+    embed = discord.Embed(title=name, description=f"Type: {_format_field_value(map_record.get('type'))}")
+    embed.add_field(name="Short Name", value=_format_field_value(map_record.get("short_name")), inline=True)
+    embed.add_field(
+        name="Playable",
+        value="Yes" if bool(map_record.get("playable")) else "No",
+        inline=True,
+    )
+    embed.add_field(
+        name="Ranked Rotation",
+        value="Yes" if bool(map_record.get("ranked_rotation")) else "No",
+        inline=True,
+    )
+    return embed
+
+
+def format_patch_embeds(patch_record: dict[str, Any]) -> list[discord.Embed]:
+    family = _format_field_value(patch_record.get("version_family"), "Unknown Patch")
+    builds = [str(build) for build in patch_record.get("builds") or []]
+    matched_build = patch_record.get("matched_build")
+
+    lines = [f"- `{build}`" + (" (match)" if matched_build == build else "") for build in builds]
+    page_texts = split_markdown_chunks("\n".join(lines) or "_No builds available._", max_chars=MAX_EMBED_DESCRIPTION_CHARS)
+    embeds = build_embed_pages(title=f"Patch {family}", page_texts=page_texts, footer_prefix="HeroesProfile")
+    for embed in embeds:
+        embed.add_field(name="Build Count", value=str(len(builds)), inline=True)
+        if matched_build:
+            embed.add_field(name="Matched Build", value=str(matched_build), inline=True)
+    return embeds
+
+
+def format_hero_embeds(hero_record: dict[str, Any], talent_payload: dict[str, Any] | None) -> list[discord.Embed]:
+    title = _format_field_value(hero_record.get("name"), "Unknown Hero")
+    summary = discord.Embed(title=title, description=f"Role: {_format_field_value(hero_record.get('new_role') or hero_record.get('role'))}")
+    summary.add_field(name="Role", value=_format_field_value(hero_record.get("role")), inline=True)
+    summary.add_field(name="New Role", value=_format_field_value(hero_record.get("new_role")), inline=True)
+    summary.add_field(name="Type", value=_format_field_value(hero_record.get("type")), inline=True)
+    summary.add_field(name="Release Date", value=_format_field_value(hero_record.get("release_date")), inline=True)
+    summary.add_field(name="Rework Date", value=_format_field_value(hero_record.get("rework_date"), "None"), inline=True)
+    summary.add_field(
+        name="Last Change Patch",
+        value=_format_field_value(hero_record.get("last_change_patch_version")),
+        inline=True,
+    )
+    aliases = [str(value) for value in hero_record.get("aliases") or [] if str(value).strip()]
+    if aliases:
+        summary.add_field(name="Aliases", value=", ".join(aliases[:10])[:1024], inline=False)
+    summary.set_footer(text="HeroesProfile • Page 1")
+
+    embeds = [summary]
+    if not talent_payload:
+        return embeds
+
+    levels = [str(level) for level in talent_payload.get("levels") or []]
+    talents_by_level = talent_payload.get("talents_by_level") or {}
+    page_number = 2
+    for level in levels:
+        talents = talents_by_level.get(level) or []
+        lines: list[str] = []
+        for talent in talents:
+            title_text = _format_field_value(talent.get("title"), "Untitled Talent")
+            hotkey = str(talent.get("hotkey") or "").strip()
+            detail_prefix = f"`{hotkey}` " if hotkey else ""
+            description = _format_field_value(talent.get("description"), "")
+            lines.append(f"**{title_text}**")
+            if description:
+                lines.append(f"{detail_prefix}{description}".strip())
+        pages = split_markdown_chunks("\n\n".join(lines) or "_No talents available._", max_chars=MAX_EMBED_DESCRIPTION_CHARS)
+        for page_idx, text in enumerate(pages, start=1):
+            embed = discord.Embed(title=f"{title} Talents - Level {level}", description=text)
+            suffix = f" ({page_idx}/{len(pages)})" if len(pages) > 1 else ""
+            embed.set_footer(text=f"HeroesProfile • Page {page_number} • Level {level}{suffix}")
+            embeds.append(embed)
+            page_number += 1
+    return embeds

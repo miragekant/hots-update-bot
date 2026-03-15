@@ -90,6 +90,57 @@ class ArticlePaginationView(discord.ui.View):
         await interaction.response.edit_message(embed=self.current_embed(), view=self)
 
 
+class EmbedPaginationView(discord.ui.View):
+    def __init__(
+        self,
+        *,
+        embeds: list[discord.Embed],
+        requesting_user_id: int | None,
+        link_url: str | None = None,
+        timeout: float = 300,
+    ) -> None:
+        super().__init__(timeout=timeout)
+        self.embeds = embeds or [discord.Embed(description="_No content available._")]
+        self.requesting_user_id = requesting_user_id
+        self.page = 1
+        self.total_pages = compute_total_pages(len(self.embeds), 1)
+
+        self.prev_button = discord.ui.Button(label="Prev", style=discord.ButtonStyle.secondary)
+        self.next_button = discord.ui.Button(label="Next", style=discord.ButtonStyle.secondary)
+        self.prev_button.callback = self._on_prev
+        self.next_button.callback = self._on_next
+
+        self.add_item(self.prev_button)
+        self.add_item(self.next_button)
+        if isinstance(link_url, str) and link_url.strip():
+            self.add_item(discord.ui.Button(label="Open Original", style=discord.ButtonStyle.link, url=link_url))
+
+        self._refresh_components()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if self.requesting_user_id is None or interaction.user.id == self.requesting_user_id:
+            return True
+        await interaction.response.send_message("Only the original requester can use these controls.", ephemeral=True)
+        return False
+
+    def current_embed(self) -> discord.Embed:
+        return self.embeds[self.page - 1]
+
+    def _refresh_components(self) -> None:
+        self.prev_button.disabled = self.page <= 1
+        self.next_button.disabled = self.page >= self.total_pages
+
+    async def _on_prev(self, interaction: discord.Interaction) -> None:
+        self.page = max(1, self.page - 1)
+        self._refresh_components()
+        await interaction.response.edit_message(embed=self.current_embed(), view=self)
+
+    async def _on_next(self, interaction: discord.Interaction) -> None:
+        self.page = min(self.total_pages, self.page + 1)
+        self._refresh_components()
+        await interaction.response.edit_message(embed=self.current_embed(), view=self)
+
+
 class NewsPaginationView(discord.ui.View):
     def __init__(
         self,

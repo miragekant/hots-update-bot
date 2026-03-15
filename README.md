@@ -6,14 +6,23 @@ Local HOTS news crawler plus Discord bot for browsing cached articles.
 - Fetches HOTS news metadata + article pages from Blizzard.
 - Stores local index + full article JSON.
 - Supports incremental updates with date-range filtering.
+- Imports HeroesProfile general API data into local cache files.
 - Exposes Discord slash commands for local news browsing:
   - `/latest`
   - `/news year:<optional>`
+  - `/hero name:<required>`
+  - `/map name:<required>`
+  - `/patch version:<required>`
 - Runs a daily non-blocking update loop inside the bot process.
 
 ## Data Output
 - `news/index.json`: lightweight index, sorted by `timestamp` (newest first).
 - `news/articles/YYYY/MM/DD/{news_id}.json`: full per-article record including `body_html`.
+- `heroesprofile/patches/index.json`: cached HeroesProfile patch families + builds.
+- `heroesprofile/maps/index.json`: cached HeroesProfile maps.
+- `heroesprofile/heroes/index.json`: cached hero summaries.
+- `heroesprofile/heroes/by_name/{slug}.json`: full hero records.
+- `heroesprofile/talents/by_hero/{slug}.json`: cached talents grouped by tier for each hero.
 
 ## Setup
 ```bash
@@ -39,6 +48,17 @@ python news/update_news.py --months 3
 python news/update_news.py --from 2025-01-01 --to 2025-12-31
 ```
 
+## Run HeroesProfile Update
+```bash
+python heroesprofile/update_data.py
+```
+
+Common options:
+```bash
+python heroesprofile/update_data.py --only heroes,talents
+python heroesprofile/update_data.py --workers 4 --verbose
+```
+
 ## Run Discord Bot
 Create `.env` with:
 ```bash
@@ -58,6 +78,9 @@ Behavior:
 - `/latest` shows latest local article in a rich embed with Prev/Next buttons for article pages.
 - `/news` shows paginated local list (5 per page), optional `year` filter, and interactive article selection.
 - Selecting an article opens a rich embed with button-based page navigation.
+- `/hero` reads cached HeroesProfile hero + talent data and shows paginated embeds.
+- `/map` reads cached HeroesProfile map data.
+- `/patch` reads cached HeroesProfile patch-family data, including full build lookups.
 - Daily job runs at configured UTC time, updates local cache, and posts update summary + newest article when changes exist.
 - Command responses read from local files only (no fetch on user read request).
 - Article body rendering maps HTML structure (headings/lists/quotes/code/links) to compact Discord markdown.
@@ -70,8 +93,10 @@ python -m pytest -q
 ## Plans
 - Discord-related implementation plans: `plans/discord/`
 - News crawler/updater plans: `plans/news/`
+- HeroesProfile API plans: `plans/heroesprofile/`
 
 ## Notes
 - Uses `requests` + `beautifulsoup4` for crawler parsing.
+- Uses `requests` for HeroesProfile API syncing.
 - Uses `discord.py` for slash commands and interaction components.
 - Discord message chunking uses a conservative `1900` character limit.

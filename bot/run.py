@@ -16,9 +16,11 @@ if __package__ is None or __package__ == "":
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from bot.config import BotConfig, load_config
-from bot.message import format_article_body_embed_pages
-from bot.pagination import ArticlePaginationView, NewsPaginationView
+from bot.heroesprofile_repository import HeroesProfileRepository
+from bot.message import format_article_body_embed_pages, format_hero_embeds, format_map_embed, format_patch_embeds
+from bot.pagination import ArticlePaginationView, EmbedPaginationView, NewsPaginationView
 from bot.repository import NewsRepository
+from heroesprofile.update_data import configure_logging as configure_heroesprofile_logging
 from news.update_news import configure_logging as configure_updater_logging
 from news.update_news import update_news
 
@@ -41,6 +43,7 @@ class HotsClient(discord.Client):
         self.config = config
         self.tree = app_commands.CommandTree(self)
         self.repository = NewsRepository()
+        self.heroesprofile_repository = HeroesProfileRepository()
         self.update_lock = asyncio.Lock()
 
     async def setup_hook(self) -> None:
@@ -148,12 +151,57 @@ def build_client(config: BotConfig) -> HotsClient:
         )
         await interaction.response.send_message(embed=view.current_embed(), view=view)
 
+    @client.tree.command(name="hero", description="Show a hero from cached HeroesProfile data")
+    @app_commands.describe(name="Hero name, alias, or translation")
+    async def hero(interaction: discord.Interaction, name: str) -> None:
+        repo = client.heroesprofile_repository
+        hero_record = repo.get_hero(name)
+        if hero_record is None:
+            await interaction.response.send_message(
+                "Hero data is not available in local cache. Run `python heroesprofile/update_data.py` first.",
+                ephemeral=True,
+            )
+            return
+
+        embeds = format_hero_embeds(hero_record, repo.get_hero_talents(str(hero_record.get("slug") or "")))
+        view = EmbedPaginationView(embeds=embeds, requesting_user_id=interaction.user.id)
+        await interaction.response.send_message(embed=view.current_embed(), view=view)
+
+    @client.tree.command(name="map", description="Show a HOTS map from cached HeroesProfile data")
+    @app_commands.describe(name="Map name or short name")
+    async def map_command(interaction: discord.Interaction, name: str) -> None:
+        map_record = client.heroesprofile_repository.get_map(name)
+        if map_record is None:
+            await interaction.response.send_message(
+                "Map data is not available in local cache. Run `python heroesprofile/update_data.py` first.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.send_message(embed=format_map_embed(map_record))
+
+    @client.tree.command(name="patch", description="Show a HOTS patch family from cached HeroesProfile data")
+    @app_commands.describe(version="Patch family like 2.55 or full build like 2.55.15.96477")
+    async def patch(interaction: discord.Interaction, version: str) -> None:
+        patch_record = client.heroesprofile_repository.get_patch(version)
+        if patch_record is None:
+            await interaction.response.send_message(
+                "Patch data is not available in local cache. Run `python heroesprofile/update_data.py` first.",
+                ephemeral=True,
+            )
+            return
+
+        embeds = format_patch_embeds(patch_record)
+        view = EmbedPaginationView(embeds=embeds, requesting_user_id=interaction.user.id)
+        await interaction.response.send_message(embed=view.current_embed(), view=view)
+
     return client
 
 
 def main() -> None:
     configure_bot_logging()
     configure_updater_logging(verbose=False)
+    configure_heroesprofile_logging(verbose=False)
     config = load_config()
     client = build_client(config)
     client.run(config.bot_token, log_level=logging.INFO, root_logger=False)

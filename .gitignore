@@ -37,3 +37,8 @@ Thumbs.db
 prompts/
 news/articles/
 news/index.json
+heroesprofile/patches/
+heroesprofile/maps/
+heroesprofile/heroes/
+heroesprofile/talents/
+heroesprofile/manifest.json

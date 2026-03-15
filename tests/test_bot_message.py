@@ -83,3 +83,42 @@ def test_format_article_body_embed_pages_respects_limit():
     pages = message.format_article_body_embed_pages(article, max_chars=300)
     assert len(pages) > 1
     assert all(len(page) <= 300 for page in pages)
+
+
+def test_format_hero_embeds_includes_summary_and_talent_pages():
+    hero = {
+        "name": "Abathur",
+        "role": "Specialist",
+        "new_role": "Support",
+        "type": "Melee",
+        "release_date": "2014-03-13 00:00:01",
+        "last_change_patch_version": "2.55.4.91769",
+        "aliases": ["Abathur", "абатур"],
+    }
+    talents = {
+        "levels": ["1"],
+        "talents_by_level": {
+            "1": [
+                {"title": "Pressurized Glands", "description": "Increase range.", "hotkey": "W"},
+                {"title": "Reinforced Carapace", "description": "Increase shield.", "hotkey": "E"},
+            ]
+        },
+    }
+
+    embeds = message.format_hero_embeds(hero, talents)
+    assert embeds[0].title == "Abathur"
+    assert embeds[1].title == "Abathur Talents - Level 1"
+    assert "Pressurized Glands" in (embeds[1].description or "")
+
+
+def test_format_patch_embeds_marks_matched_build():
+    embeds = message.format_patch_embeds(
+        {
+            "version_family": "2.55",
+            "builds": ["2.55.15.96477", "2.55.14.95918"],
+            "matched_build": "2.55.15.96477",
+        }
+    )
+    assert embeds[0].title == "Patch 2.55"
+    assert "2.55.15.96477" in (embeds[0].description or "")
+    assert any(field.name == "Matched Build" for field in embeds[0].fields)

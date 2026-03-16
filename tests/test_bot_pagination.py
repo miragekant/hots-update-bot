@@ -8,6 +8,7 @@ from bot.pagination import (
     ArticlePaginationView,
     EmbedPaginationView,
     HeroPaginationView,
+    HeroesProfileListPaginationView,
     build_article_page_embed,
     compute_total_pages,
     page_slice,
@@ -79,8 +80,8 @@ class _FakeResponse:
         self.edited_embed = embed
         self.edited_view = view
 
-    async def send_message(self, content: str, *, ephemeral: bool) -> None:
-        self.sent_message = {"content": content, "ephemeral": ephemeral}
+    async def send_message(self, content: str | None = None, *, ephemeral: bool = False, embed=None, view=None) -> None:
+        self.sent_message = {"content": content, "ephemeral": ephemeral, "embed": embed, "view": view}
 
 
 class _FakeInteraction:
@@ -118,6 +119,21 @@ def test_hero_pagination_view_switches_pages_and_disables_active_button():
     asyncio.run(_run())
 
 
+def test_hero_pagination_view_supports_summary_and_tier_buttons():
+    async def _run() -> None:
+        embeds = [discord.Embed(title="Summary"), discord.Embed(title="Level 1"), discord.Embed(title="Level 4")]
+        page_targets = [
+            HeroPageTarget(label="Summary", page_index=0),
+            HeroPageTarget(label="Level 1", page_index=1),
+            HeroPageTarget(label="Level 4", page_index=2),
+        ]
+        view = HeroPaginationView(embeds=embeds, page_targets=page_targets, requesting_user_id=123)
+
+        assert [button.label for button in view.page_buttons] == ["Summary", "Level 1", "Level 4"]
+
+    asyncio.run(_run())
+
+
 def test_hero_pagination_view_rejects_other_users():
     async def _run() -> None:
         view = HeroPaginationView(
@@ -133,6 +149,97 @@ def test_hero_pagination_view_rejects_other_users():
         assert interaction.response.sent_message == {
             "content": "Only the original requester can use these controls.",
             "ephemeral": True,
+            "embed": None,
+            "view": None,
+        }
+
+    asyncio.run(_run())
+
+
+def test_heroesprofile_list_pagination_view_pages_and_selects_detail():
+    async def _run() -> None:
+        items = [{"slug": f"hero-{index}", "name": f"Hero {index}", "role": "Support"} for index in range(12)]
+        view = HeroesProfileListPaginationView(
+            requesting_user_id=123,
+            items=items,
+            page_size=10,
+            select_placeholder="Select a hero to open",
+            embed_builder=lambda current, page, total: discord.Embed(title=f"Page {page}/{total}", description=str(len(current))),
+            option_label_getter=lambda item: item["name"],
+            option_description_getter=lambda item: item["role"],
+            option_value_getter=lambda item: item["slug"],
+            detail_loader=lambda selected: (discord.Embed(title=selected), None),
+        )
+
+        assert view.prev_button.disabled is True
+        assert view.next_button.disabled is False
+        assert [option.value for option in view.select.options] == [f"hero-{index}" for index in range(10)]
+
+        interaction = _FakeInteraction(user_id=123)
+        await view.next_button.callback(interaction)
+        assert interaction.response.edited_embed.title == "Page 2/2"
+        assert [option.value for option in view.select.options] == ["hero-10", "hero-11"]
+
+        view.select._values = ["hero-10"]
+        select_interaction = _FakeInteraction(user_id=123)
+        await view.select.callback(select_interaction)
+        assert select_interaction.response.sent_message["embed"].title == "hero-10"
+        assert select_interaction.response.sent_message["view"] is None
+
+    asyncio.run(_run())
+
+
+def test_heroesprofile_list_pagination_view_rejects_other_users():
+    async def _run() -> None:
+        view = HeroesProfileListPaginationView(
+            requesting_user_id=123,
+            items=[{"slug": "hero-1", "name": "Hero 1"}],
+            page_size=10,
+            select_placeholder="Select a hero to open",
+            embed_builder=lambda current, page, total: discord.Embed(title="Heroes"),
+            option_label_getter=lambda item: item["name"],
+            option_description_getter=lambda item: "Role",
+            option_value_getter=lambda item: item["slug"],
+            detail_loader=lambda selected: (discord.Embed(title=selected), None),
+        )
+        interaction = _FakeInteraction(user_id=456)
+
+        allowed = await view.interaction_check(interaction)
+
+        assert allowed is False
+        assert interaction.response.sent_message == {
+            "content": "Only the original requester can use these controls.",
+            "ephemeral": True,
+            "embed": None,
+            "view": None,
+        }
+
+    asyncio.run(_run())
+
+
+def test_heroesprofile_list_pagination_view_reports_missing_detail():
+    async def _run() -> None:
+        view = HeroesProfileListPaginationView(
+            requesting_user_id=123,
+            items=[{"slug": "hero-1", "name": "Hero 1"}],
+            page_size=10,
+            select_placeholder="Select a hero to open",
+            embed_builder=lambda current, page, total: discord.Embed(title="Heroes"),
+            option_label_getter=lambda item: item["name"],
+            option_description_getter=lambda item: "Role",
+            option_value_getter=lambda item: item["slug"],
+            detail_loader=lambda selected: None,
+        )
+
+        view.select._values = ["hero-1"]
+        interaction = _FakeInteraction(user_id=123)
+        await view.select.callback(interaction)
+
+        assert interaction.response.sent_message == {
+            "content": "Item is not available in local cache.",
+            "ephemeral": True,
+            "embed": None,
+            "view": None,
         }
 
     asyncio.run(_run())

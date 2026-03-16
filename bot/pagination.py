@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import Any, Callable
 
 import discord
 
@@ -194,6 +194,98 @@ class HeroPaginationView(discord.ui.View):
         self.page_index = min(max(page_index, 0), len(self.embeds) - 1)
         self._refresh_components()
         await interaction.response.edit_message(embed=self.current_embed(), view=self)
+
+
+class HeroesProfileListPaginationView(discord.ui.View):
+    def __init__(
+        self,
+        *,
+        requesting_user_id: int | None,
+        items: list[dict[str, Any]],
+        page_size: int,
+        select_placeholder: str,
+        embed_builder: Callable[[list[dict[str, Any]], int, int], discord.Embed],
+        option_label_getter: Callable[[dict[str, Any]], str],
+        option_description_getter: Callable[[dict[str, Any]], str],
+        option_value_getter: Callable[[dict[str, Any]], str],
+        detail_loader: Callable[[str], tuple[discord.Embed, discord.ui.View | None] | None],
+    ) -> None:
+        super().__init__(timeout=300)
+        self.requesting_user_id = requesting_user_id
+        self.items = items
+        self.page_size = page_size
+        self.embed_builder = embed_builder
+        self.option_label_getter = option_label_getter
+        self.option_description_getter = option_description_getter
+        self.option_value_getter = option_value_getter
+        self.detail_loader = detail_loader
+        self.page = 1
+        self.total_pages = compute_total_pages(len(items), page_size)
+
+        self.prev_button = discord.ui.Button(label="Prev", style=discord.ButtonStyle.secondary)
+        self.next_button = discord.ui.Button(label="Next", style=discord.ButtonStyle.secondary)
+        self.select = discord.ui.Select(placeholder=select_placeholder)
+
+        self.prev_button.callback = self._on_prev
+        self.next_button.callback = self._on_next
+        self.select.callback = self._on_select
+
+        self.add_item(self.prev_button)
+        self.add_item(self.next_button)
+        self.add_item(self.select)
+        self._refresh_components()
+
+    def _current_items(self) -> list[dict[str, Any]]:
+        return page_slice(self.items, self.page, self.page_size)
+
+    def current_embed(self) -> discord.Embed:
+        return self.embed_builder(self._current_items(), self.page, self.total_pages)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if self.requesting_user_id is None or interaction.user.id == self.requesting_user_id:
+            return True
+        await interaction.response.send_message("Only the original requester can use these controls.", ephemeral=True)
+        return False
+
+    def _refresh_components(self) -> None:
+        self.prev_button.disabled = self.page <= 1
+        self.next_button.disabled = self.page >= self.total_pages
+
+        options: list[discord.SelectOption] = []
+        for item in self._current_items():
+            label = self.option_label_getter(item)[:100] or "Unknown"
+            description = self.option_description_getter(item)[:100] or "Open details"
+            value = self.option_value_getter(item)
+            options.append(discord.SelectOption(label=label, description=description, value=value))
+        if not options:
+            options.append(discord.SelectOption(label="No items", value="__none__", description="No item on this page"))
+
+        self.select.options = options
+        self.select.disabled = options[0].value == "__none__"
+
+    async def _on_prev(self, interaction: discord.Interaction) -> None:
+        self.page = max(1, self.page - 1)
+        self._refresh_components()
+        await interaction.response.edit_message(embed=self.current_embed(), view=self)
+
+    async def _on_next(self, interaction: discord.Interaction) -> None:
+        self.page = min(self.total_pages, self.page + 1)
+        self._refresh_components()
+        await interaction.response.edit_message(embed=self.current_embed(), view=self)
+
+    async def _on_select(self, interaction: discord.Interaction) -> None:
+        selected = self.select.values[0]
+        if selected == "__none__":
+            await interaction.response.send_message("No item available on this page.", ephemeral=True)
+            return
+
+        detail = self.detail_loader(selected)
+        if detail is None:
+            await interaction.response.send_message("Item is not available in local cache.", ephemeral=True)
+            return
+
+        embed, view = detail
+        await interaction.response.send_message(embed=embed, view=view)
 
 
 class NewsPaginationView(discord.ui.View):

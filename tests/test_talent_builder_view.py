@@ -1,10 +1,14 @@
 import asyncio
+import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import discord
 
 from bot.talent_builder import TalentBuildData, TalentBuildHero, TalentBuildTier, TalentBuildTierOption
-from bot.talent_builder_view import HERO_PAGE_SIZE, TALENT_ANY_VALUE, TalentBuilderHeroSelectView, TalentBuilderView
+from bot.talent_builder_view import HERO_PAGE_SIZE, TALENT_ANY_VALUE, TalentBuilderHeroSelectView, TalentBuilderView, create_talent_builder_entry
+from bot.pagination import HeroPaginationView
+from bot.heroesprofile_repository import HeroesProfileRepository
 
 
 class _FakeMessage:
@@ -26,8 +30,8 @@ class _FakeResponse:
         self.edited_embed = embed
         self.edited_view = view
 
-    async def send_message(self, content=None, *, embed=None, ephemeral: bool) -> None:
-        self.sent_message = {"content": content, "embed": embed, "ephemeral": ephemeral}
+    async def send_message(self, content=None, *, embed=None, view=None, ephemeral: bool) -> None:
+        self.sent_message = {"content": content, "embed": embed, "view": view, "ephemeral": ephemeral}
 
     async def send_modal(self, modal) -> None:
         self.sent_modal = modal
@@ -37,6 +41,9 @@ class _FakeInteraction:
     def __init__(self, user_id: int) -> None:
         self.user = SimpleNamespace(id=user_id)
         self.response = _FakeResponse()
+
+    async def original_response(self):
+        return _FakeMessage()
 
 
 class _Repo:
@@ -90,6 +97,7 @@ def test_talent_builder_view_rejects_other_users():
         assert interaction.response.sent_message == {
             "content": "Only the original requester can use these controls.",
             "embed": None,
+            "view": None,
             "ephemeral": True,
         }
 
@@ -134,6 +142,7 @@ def test_talent_builder_view_selects_talent_and_finishes():
 
         assert modal_interaction.response.sent_message["ephemeral"] is True
         assert modal_interaction.response.sent_message["embed"].title == "Leoric Build - Drain King"
+        assert "Level 1: [2] Fealty Unto Death" in modal_interaction.response.sent_message["embed"].fields[0].value
         assert "[T2000000,Leoric]" in modal_interaction.response.sent_message["content"]
         assert message.edited["view"] is None
 
@@ -157,5 +166,152 @@ def test_talent_builder_hero_select_view_pages_and_starts_builder():
         await view.start_builder(interaction, "leoric")
         assert isinstance(interaction.response.edited_view, TalentBuilderView)
         assert interaction.response.edited_embed.title == "Talent Builder - Leoric"
+
+    asyncio.run(_run())
+
+
+def _write(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def _repository_with_vikings(tmp_path: Path) -> HeroesProfileRepository:
+    _write(
+        tmp_path / "heroes" / "index.json",
+        {
+            "heroes": [
+                {
+                    "name": "The Lost Vikings",
+                    "slug": "thelostvikings",
+                    "short_name": "thelostvikings",
+                    "build_copy_name": "LostVikings",
+                    "file_path": str(tmp_path / "heroes" / "by_name" / "thelostvikings.json"),
+                }
+            ]
+        },
+    )
+    _write(
+        tmp_path / "heroes" / "by_name" / "thelostvikings.json",
+        {
+            "name": "The Lost Vikings",
+            "slug": "thelostvikings",
+            "build_copy_name": "LostVikings",
+        },
+    )
+    _write(
+        tmp_path / "talents" / "by_hero" / "thelostvikings.json",
+        {
+            "levels": ["1", "4", "7", "10", "13", "16", "20"],
+            "talents_by_level": {
+                "1": [{"title": "Olaf the Stout", "description": "Level 1 detail", "hotkey": "Passive"}],
+                "4": [{"title": "Pain Don't Hurt", "description": "Level 4 detail", "hotkey": "Passive"}],
+                "7": [{"title": "Spin To Win!", "description": "Level 7 detail", "hotkey": "W"}],
+                "10": [{"title": "Longboat Raid!", "description": "Level 10 detail", "hotkey": "R"}],
+                "13": [{"title": "Hunka' Burning Olaf", "description": "Level 13 detail", "hotkey": "Trait"}],
+                "16": [{"title": "Large and In Charge", "description": "Level 16 detail", "hotkey": "Passive"}],
+                "20": [{"title": "Checkpoint Reached", "description": "Level 20 detail", "hotkey": "Passive"}],
+            },
+        },
+    )
+    return HeroesProfileRepository(data_root=tmp_path)
+
+
+def test_create_talent_builder_entry_parses_talent_string_into_paginated_result(tmp_path: Path):
+    async def _run() -> None:
+        interaction = _FakeInteraction(user_id=123)
+        repo = _repository_with_vikings(tmp_path)
+
+        await create_talent_builder_entry(
+            interaction=interaction,
+            repository=repo,
+            requesting_user_id=123,
+            hero_name=None,
+            talent_string="[T1111111,LostVikings]",
+        )
+
+        sent = interaction.response.sent_message
+        assert sent["ephemeral"] is True
+        assert "[T1111111,LostVikings]" in sent["content"]
+        assert sent["embed"].title == "The Lost Vikings Build"
+        assert isinstance(sent["view"], HeroPaginationView)
+        assert "Level 1: [1] **Olaf the Stout** `Passive`" in sent["embed"].fields[0].value
+        assert [button.label for button in sent["view"].page_buttons] == [
+            "Summary",
+            "Level 1",
+            "Level 4",
+            "Level 7",
+            "Level 10",
+            "Level 13",
+            "Level 16",
+            "Level 20",
+        ]
+
+    asyncio.run(_run())
+
+
+def test_parsed_talent_builder_tier_buttons_jump_to_requested_level(tmp_path: Path):
+    async def _run() -> None:
+        interaction = _FakeInteraction(user_id=123)
+        repo = _repository_with_vikings(tmp_path)
+
+        await create_talent_builder_entry(
+            interaction=interaction,
+            repository=repo,
+            requesting_user_id=123,
+            hero_name=None,
+            talent_string="[T1111111,LostVikings]",
+        )
+
+        view = interaction.response.sent_message["view"]
+        assert isinstance(view, HeroPaginationView)
+        level_10_button = next(button for button in view.page_buttons if button.label == "Level 10")
+
+        click_interaction = _FakeInteraction(user_id=123)
+        await level_10_button.callback(click_interaction)
+
+        assert click_interaction.response.edited_embed.title == "The Lost Vikings Build - Level 10"
+        assert level_10_button.disabled is True
+
+    asyncio.run(_run())
+
+
+def test_create_talent_builder_entry_rejects_invalid_tier_index(tmp_path: Path):
+    async def _run() -> None:
+        interaction = _FakeInteraction(user_id=123)
+        repo = _repository_with_vikings(tmp_path)
+
+        await create_talent_builder_entry(
+            interaction=interaction,
+            repository=repo,
+            requesting_user_id=123,
+            hero_name=None,
+            talent_string="[T2111111,LostVikings]",
+        )
+
+        assert interaction.response.sent_message["content"] == (
+            "Talent string selects option `2` for Level 1, but `The Lost Vikings` only has 1 cached option(s) for that tier."
+        )
+        assert interaction.response.sent_message["ephemeral"] is True
+
+    asyncio.run(_run())
+
+
+def test_create_talent_builder_entry_rejects_hero_mismatch(tmp_path: Path):
+    async def _run() -> None:
+        interaction = _FakeInteraction(user_id=123)
+        repo = _repository_with_vikings(tmp_path)
+
+        await create_talent_builder_entry(
+            interaction=interaction,
+            repository=repo,
+            requesting_user_id=123,
+            hero_name="Unknown Hero",
+            talent_string="[T1111111,LostVikings]",
+        )
+
+        assert interaction.response.sent_message["content"] == (
+            "Hero talent data is not available in local cache. Run `python heroesprofile/update_data.py --only heroes,talents` first."
+        )
+        assert interaction.response.sent_message["ephemeral"] is True
 
     asyncio.run(_run())

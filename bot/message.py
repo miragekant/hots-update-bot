@@ -340,6 +340,84 @@ def format_news_list_embed(items: list[dict[str, Any]], page: int, total_pages: 
     return embed
 
 
+def _build_summary_list_embed(
+    *,
+    title: str,
+    items: list[dict[str, Any]],
+    page: int,
+    total_pages: int,
+    empty_label: str,
+    empty_text: str,
+    line_builder: Any,
+) -> discord.Embed:
+    embed = discord.Embed(title=title, description="Select an item below to view full details.")
+
+    if not items:
+        embed.add_field(name=empty_label, value=empty_text, inline=False)
+    else:
+        lines = [f"{index}. {line_builder(item)}" for index, item in enumerate(items, start=1)]
+        embed.add_field(name=empty_label, value="\n".join(lines), inline=False)
+
+    embed.set_footer(text=f"Page {page}/{total_pages}")
+    return embed
+
+
+def format_hero_list_embed(items: list[dict[str, Any]], page: int, total_pages: int) -> discord.Embed:
+    def _line(item: dict[str, Any]) -> str:
+        name = _format_field_value(item.get("name"), "Unknown Hero")
+        role = _format_field_value(item.get("new_role") or item.get("role"))
+        hero_type = _format_field_value(item.get("type"))
+        return f"**{name}** - {role}, {hero_type}"
+
+    return _build_summary_list_embed(
+        title="HOTS Heroes",
+        items=items,
+        page=page,
+        total_pages=total_pages,
+        empty_label="Heroes",
+        empty_text="No local heroes found.",
+        line_builder=_line,
+    )
+
+
+def format_map_list_embed(items: list[dict[str, Any]], page: int, total_pages: int) -> discord.Embed:
+    def _line(item: dict[str, Any]) -> str:
+        name = _format_field_value(item.get("name"), "Unknown Map")
+        map_type = _format_field_value(item.get("type"))
+        playable = "Playable" if bool(item.get("playable")) else "Not playable"
+        ranked = "Ranked" if bool(item.get("ranked_rotation")) else "Not ranked"
+        return f"**{name}** - {map_type}, {playable}, {ranked}"
+
+    return _build_summary_list_embed(
+        title="HOTS Maps",
+        items=items,
+        page=page,
+        total_pages=total_pages,
+        empty_label="Maps",
+        empty_text="No local maps found.",
+        line_builder=_line,
+    )
+
+
+def format_patch_list_embed(items: list[dict[str, Any]], page: int, total_pages: int) -> discord.Embed:
+    def _line(item: dict[str, Any]) -> str:
+        family = _format_field_value(item.get("version_family"), "Unknown Patch")
+        build_count = int(item.get("build_count") or len(item.get("builds") or []))
+        newest_build = str((item.get("builds") or [""])[0]).strip()
+        latest_label = f", latest `{newest_build}`" if newest_build else ""
+        return f"**{family}** - {build_count} builds{latest_label}"
+
+    return _build_summary_list_embed(
+        title="HOTS Patches",
+        items=items,
+        page=page,
+        total_pages=total_pages,
+        empty_label="Patches",
+        empty_text="No local patches found.",
+        line_builder=_line,
+    )
+
+
 def build_embed_pages(
     *,
     title: str,
@@ -514,13 +592,72 @@ def format_talent_build_result(
         picked = int(selections.get(level, 0) or 0)
         options = tier_options.get(level) or []
         if picked <= 0:
-            label = "Any talent"
+            label = "[0] Any talent"
         else:
             match = next((option for option in options if option.index == picked), None)
-            label = match.title if match is not None else f"Option {picked}"
+            title = match.title if match is not None else f"Option {picked}"
+            label = f"[{picked}] {title}"
         lines.append(f"Level {level}: {label}")
     embed.add_field(name="Selections", value="\n".join(lines), inline=False)
     if build_name:
         embed.add_field(name="Build Name", value=build_name, inline=False)
     embed.set_footer(text="Talent Builder • Export")
     return embed, f"```text\n{talent_string}\n```"
+
+
+def format_parsed_talent_build_embeds(
+    *,
+    hero_name: str,
+    selections: dict[str, int],
+    tier_options: dict[str, list[TalentBuilderTierOption]],
+) -> tuple[list[discord.Embed], list[HeroPageTarget]]:
+    summary_embed = discord.Embed(
+        title=f"{hero_name} Build",
+        description="Parsed HOTS talent build from local cache.",
+    )
+    summary_lines: list[str] = []
+    for level in ("1", "4", "7", "10", "13", "16", "20"):
+        picked = int(selections.get(level, 0) or 0)
+        options = tier_options.get(level) or []
+        if picked <= 0:
+            line = f"Level {level}: [0] Any talent"
+        else:
+            match = next((option for option in options if option.index == picked), None)
+            label = match.title if match is not None else f"Option {picked}"
+            hotkey = f" `{match.hotkey}`" if match is not None and match.hotkey else ""
+            line = f"Level {level}: [{picked}] **{label}**{hotkey}"
+        summary_lines.append(line)
+    summary_embed.add_field(name="Selections", value="\n".join(summary_lines), inline=False)
+
+    embeds = [summary_embed]
+    page_targets = [HeroPageTarget(label="Summary", page_index=0)]
+    for level in ("1", "4", "7", "10", "13", "16", "20"):
+        page_targets.append(HeroPageTarget(label=f"Level {level}", page_index=len(embeds)))
+        picked = int(selections.get(level, 0) or 0)
+        if picked <= 0:
+            detail_embed = discord.Embed(
+                title=f"{hero_name} Build - Level {level}",
+                description="**[0] Any talent**",
+            )
+            embeds.append(detail_embed)
+            continue
+
+        options = tier_options.get(level) or []
+        match = next((option for option in options if option.index == picked), None)
+        title = match.title if match is not None else f"Option {picked}"
+        hotkey = f"`{match.hotkey}`\n\n" if match is not None and match.hotkey else ""
+        body = f"**[{picked}] {title}**\n\n{hotkey}{(match.description if match is not None else '').strip()}".strip()
+        pages = split_markdown_chunks(body or "_No description available._", max_chars=MAX_EMBED_DESCRIPTION_CHARS)
+        for page_index, page in enumerate(pages, start=1):
+            detail_embed = discord.Embed(
+                title=f"{hero_name} Build - Level {level}",
+                description=page,
+            )
+            if len(pages) > 1:
+                detail_embed.add_field(name="Detail Page", value=f"{page_index}/{len(pages)}", inline=False)
+            embeds.append(detail_embed)
+
+    total_pages = len(embeds)
+    for page_index, embed in enumerate(embeds, start=1):
+        embed.set_footer(text=f"Talent Builder • Parsed Build • Page {page_index}/{total_pages}")
+    return embeds, page_targets

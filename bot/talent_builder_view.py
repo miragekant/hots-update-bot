@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from typing import Any
-
 import discord
 
-from bot.heroesprofile_repository import HeroesProfileRepository
-from bot.message import TalentBuilderTierOption, format_talent_builder_embed, format_talent_build_result
+from bot.heroesprofile_repository import AmbiguousTalentBuildHeroError, HeroesProfileRepository
+from bot.message import TalentBuilderTierOption, format_parsed_talent_build_embeds, format_talent_builder_embed, format_talent_build_result
+from bot.pagination import HeroPaginationView
 from bot.talent_builder import TALENT_LEVELS, TalentBuildData
 
 HERO_PAGE_SIZE = 25
@@ -266,7 +265,85 @@ async def create_talent_builder_entry(
     repository: HeroesProfileRepository,
     requesting_user_id: int,
     hero_name: str | None,
+    talent_string: str | None = None,
 ) -> None:
+    if talent_string:
+        from bot.talent_builder import parse_talent_string
+
+        try:
+            parsed = parse_talent_string(talent_string)
+        except ValueError:
+            await interaction.response.send_message(
+                "Talent string must use HOTS format like `[T3211221,Leoric]`.",
+                ephemeral=True,
+            )
+            return
+
+        try:
+            build_data = repository.get_talent_build_by_export_token(parsed.hero_token)
+        except AmbiguousTalentBuildHeroError:
+            await interaction.response.send_message(
+                f"Hero token `{parsed.hero_token}` matches multiple local heroes. Resolve the local cache before using this build string.",
+                ephemeral=True,
+            )
+            return
+
+        if build_data is None:
+            await interaction.response.send_message(
+                f"Hero token `{parsed.hero_token}` was not found in local cache. Run `python heroesprofile/update_data.py --only heroes,talents` first.",
+                ephemeral=True,
+            )
+            return
+
+        if hero_name:
+            requested_build = repository.get_talent_build(hero_name)
+            if requested_build is None:
+                await interaction.response.send_message(
+                    "Hero talent data is not available in local cache. Run `python heroesprofile/update_data.py --only heroes,talents` first.",
+                    ephemeral=True,
+                )
+                return
+            if requested_build.hero.slug != build_data.hero.slug:
+                await interaction.response.send_message(
+                    f"The provided hero does not match the talent string hero `{build_data.hero.name}`.",
+                    ephemeral=True,
+                )
+                return
+
+        tier_options = _tier_option_map(build_data)
+        for level in TALENT_LEVELS:
+            picked = int(parsed.selections.get(level, 0) or 0)
+            options = tier_options.get(level) or []
+            if picked <= 0:
+                continue
+            if not any(option.index == picked for option in options):
+                await interaction.response.send_message(
+                    f"Talent string selects option `{picked}` for Level {level}, but `{build_data.hero.name}` only has {len(options)} cached option(s) for that tier.",
+                    ephemeral=True,
+                )
+                return
+
+        embeds, page_targets = format_parsed_talent_build_embeds(
+            hero_name=build_data.hero.name,
+            selections=parsed.selections,
+            tier_options=tier_options,
+        )
+        if len(embeds) == 1:
+            await interaction.response.send_message(
+                content=f"```text\n{talent_string.strip()}\n```",
+                embed=embeds[0],
+                ephemeral=True,
+            )
+            return
+        view = HeroPaginationView(embeds=embeds, page_targets=page_targets, requesting_user_id=requesting_user_id)
+        await interaction.response.send_message(
+            content=f"```text\n{talent_string.strip()}\n```",
+            embed=view.current_embed(),
+            view=view,
+            ephemeral=True,
+        )
+        return
+
     if hero_name:
         build_data = repository.get_talent_build(hero_name)
         if build_data is None:

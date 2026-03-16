@@ -10,10 +10,10 @@ Local HOTS news crawler plus Discord bot for browsing cached articles.
 - Exposes Discord slash commands for local news browsing:
   - `/latest`
   - `/news year:<optional>`
-  - `/hero name:<required>`
-  - `/map name:<required>`
-  - `/patch version:<required>`
-  - `/talentbuilder`
+  - `/hero name:<optional>`
+  - `/map name:<optional>`
+  - `/patch version:<optional>`
+  - `/talentbuilder hero:<optional> talent_string:<optional>`
 - Runs a daily non-blocking update loop inside the bot process.
 
 ## Data Output
@@ -79,10 +79,12 @@ Behavior:
 - `/latest` shows latest local article in a rich embed with Prev/Next buttons for article pages.
 - `/news` shows paginated local list (5 per page), optional `year` filter, and interactive article selection.
 - Selecting an article opens a rich embed with button-based page navigation.
-- `/hero` reads cached HeroesProfile hero + talent data and shows direct buttons for `Summary` and each talent tier page.
+- `/hero`, `/map`, and `/patch` accept an optional lookup value; when omitted, each command opens a cache-backed paginated list with a select menu for drilling into a local record.
+- `/hero` detail views show direct buttons for `Summary` and each talent tier page.
 - `/map` reads cached HeroesProfile map data.
 - `/patch` reads cached HeroesProfile patch-family data, including full build lookups.
 - `/talentbuilder` opens an ephemeral, cache-only builder for choosing a hero, selecting talents tier by tier, revising prior tiers, optionally naming the build, and exporting a HOTS talent string in a copy-friendly code block.
+- `/talentbuilder` can also parse an existing HOTS talent string such as `[T3211221,Leoric]`, validate it against the local cache, and open a paginated per-tier breakdown.
 - Daily job runs at configured UTC time, updates local cache, and posts update summary + newest article when changes exist.
 - Command responses read from local files only (no fetch on user read request).
 - Article body rendering maps HTML structure (headings/lists/quotes/code/links) to compact Discord markdown.

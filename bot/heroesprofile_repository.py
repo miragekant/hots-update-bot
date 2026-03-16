@@ -11,6 +11,10 @@ from heroesprofile.update_data import normalize_lookup_key
 DEFAULT_BUILD_LEVELS = ["1", "4", "7", "10", "13", "16", "20"]
 
 
+class AmbiguousTalentBuildHeroError(ValueError):
+    pass
+
+
 @dataclass
 class HeroesProfileRepository:
     data_root: Path = Path("heroesprofile")
@@ -31,6 +35,9 @@ class HeroesProfileRepository:
         payload = self._read_json(self.data_root / "heroes" / "index.json", {"heroes": []})
         heroes = payload.get("heroes")
         return heroes if isinstance(heroes, list) else []
+
+    def list_heroes(self) -> list[dict[str, Any]]:
+        return self.hero_summaries()
 
     def _hero_index(self) -> dict[str, dict[str, Any]]:
         index: dict[str, dict[str, Any]] = {}
@@ -105,6 +112,24 @@ class HeroesProfileRepository:
             for hero in self.list_talent_build_heroes()
         ]
 
+    def get_talent_build_by_export_token(self, hero_token: str) -> TalentBuildData | None:
+        wanted = str(hero_token or "").strip()
+        if not wanted:
+            return None
+
+        exact_matches = [hero for hero in self.list_talent_build_heroes() if hero.export_token == wanted]
+        if len(exact_matches) > 1:
+            raise AmbiguousTalentBuildHeroError(f"multiple heroes match export token {wanted}")
+        if len(exact_matches) == 1:
+            return self.get_talent_build(exact_matches[0].slug)
+
+        fallback_matches = [hero for hero in self.list_talent_build_heroes() if normalize_lookup_key(hero.export_token) == normalize_lookup_key(wanted)]
+        if len(fallback_matches) > 1:
+            raise AmbiguousTalentBuildHeroError(f"multiple heroes match export token {wanted}")
+        if len(fallback_matches) == 1:
+            return self.get_talent_build(fallback_matches[0].slug)
+        return None
+
     def get_talent_build(self, hero_name_or_slug: str) -> TalentBuildData | None:
         hero_record = self.get_hero(hero_name_or_slug)
         if hero_record is None:
@@ -178,6 +203,9 @@ class HeroesProfileRepository:
         maps = payload.get("maps")
         return maps if isinstance(maps, list) else []
 
+    def list_maps(self) -> list[dict[str, Any]]:
+        return self.maps()
+
     def get_map(self, name: str) -> dict[str, Any] | None:
         marker = normalize_lookup_key(name)
         for item in self.maps():
@@ -191,6 +219,9 @@ class HeroesProfileRepository:
         payload = self._read_json(self.data_root / "patches" / "index.json", {"patches": []})
         patches = payload.get("patches")
         return patches if isinstance(patches, list) else []
+
+    def list_patches(self) -> list[dict[str, Any]]:
+        return self.patch_families()
 
     def get_patch(self, version: str) -> dict[str, Any] | None:
         wanted = str(version or "").strip()

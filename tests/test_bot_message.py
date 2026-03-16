@@ -73,6 +73,42 @@ def test_format_news_list_embed_has_paging_footer():
     assert embed.footer.text == "Page 1/3"
 
 
+def test_format_hero_list_embed_shows_summary_lines():
+    embed = message.format_hero_list_embed(
+        [{"name": "Abathur", "role": "Specialist", "new_role": "Support", "type": "Melee"}],
+        page=1,
+        total_pages=2,
+    )
+    assert embed.title == "HOTS Heroes"
+    assert "Abathur" in embed.fields[0].value
+    assert "Support" in embed.fields[0].value
+    assert embed.footer.text == "Page 1/2"
+
+
+def test_format_map_list_embed_shows_flags():
+    embed = message.format_map_list_embed(
+        [{"name": "Alterac Pass", "type": "standard", "playable": 1, "ranked_rotation": 0}],
+        page=2,
+        total_pages=3,
+    )
+    assert embed.title == "HOTS Maps"
+    assert "Playable" in embed.fields[0].value
+    assert "Not ranked" in embed.fields[0].value
+    assert embed.footer.text == "Page 2/3"
+
+
+def test_format_patch_list_embed_shows_latest_build():
+    embed = message.format_patch_list_embed(
+        [{"version_family": "2.55", "build_count": 2, "builds": ["2.55.15.96477", "2.55.14.95918"]}],
+        page=1,
+        total_pages=1,
+    )
+    assert embed.title == "HOTS Patches"
+    assert "2.55" in embed.fields[0].value
+    assert "2 builds" in embed.fields[0].value
+    assert "2.55.15.96477" in embed.fields[0].value
+
+
 def test_format_article_body_embed_pages_has_fallback():
     pages = message.format_article_body_embed_pages({"body_html": ""})
     assert pages == ["_No article body available._"]

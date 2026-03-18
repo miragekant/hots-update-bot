@@ -75,6 +75,21 @@ Start bot:
 python bot/run.py
 ```
 
+For GCP Secret Manager-backed config, keep only the source selector and project id in the environment:
+```bash
+BOT_CONFIG_SOURCE=gcp
+GCP_PROJECT_ID=your-gcp-project-id
+```
+
+Expected Secret Manager secret names:
+- `BOT_TOKEN`
+- `GUILD_ID`
+- `NEWS_CHANNEL_ID`
+- `DAILY_UPDATE_UTC_HOUR` (optional, defaults to `15`)
+- `DAILY_UPDATE_UTC_MINUTE` (optional, defaults to `0`)
+
+This keeps Discord command/runtime reads local while moving bot credentials and schedule config out of `.env`. Authentication for Secret Manager uses standard Google Cloud application default credentials.
+
 Behavior:
 - `/latest` shows latest local article in a rich embed with Prev/Next buttons for article pages.
 - `/news` shows paginated local list (5 per page), optional `year` filter, and interactive article selection.

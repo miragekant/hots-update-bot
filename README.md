@@ -66,8 +66,7 @@ Create `.env` with:
 BOT_TOKEN=your_discord_bot_token
 GUILD_ID=123456789012345678
 NEWS_CHANNEL_ID=123456789012345678
-DAILY_UPDATE_UTC_HOUR=15
-DAILY_UPDATE_UTC_MINUTE=0
+DAILY_UPDATE_CRON="0 15 * * *"
 ```
 
 Start bot:
@@ -85,8 +84,7 @@ Expected Secret Manager secret names:
 - `BOT_TOKEN`
 - `GUILD_ID`
 - `NEWS_CHANNEL_ID`
-- `DAILY_UPDATE_UTC_HOUR` (optional, defaults to `15`)
-- `DAILY_UPDATE_UTC_MINUTE` (optional, defaults to `0`)
+- `DAILY_UPDATE_CRON` (optional, defaults to `0 15 * * *`)
 
 This keeps Discord command/runtime reads local while moving bot credentials and schedule config out of `.env`. Authentication for Secret Manager uses standard Google Cloud application default credentials.
 
@@ -100,7 +98,7 @@ Behavior:
 - `/patch` reads cached HeroesProfile patch-family data, including full build lookups.
 - `/talentbuilder` opens an ephemeral, cache-only builder for choosing a hero, selecting talents tier by tier, revising prior tiers, optionally naming the build, and exporting a HOTS talent string in a copy-friendly code block.
 - `/talentbuilder` can also parse an existing HOTS talent string such as `[T3211221,Leoric]`, validate it against the local cache, and open a paginated per-tier breakdown.
-- Daily job runs at configured UTC time, updates local cache, and posts update summary + newest article when changes exist.
+- Daily job runs on the configured UTC cron schedule, updates local cache, and posts update summary + newest article when changes exist.
 - Command responses read from local files only (no fetch on user read request).
 - Article body rendering maps HTML structure (headings/lists/quotes/code/links) to compact Discord markdown.
 

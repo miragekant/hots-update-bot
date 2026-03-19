@@ -55,8 +55,7 @@ Integrate a Discord bot with the existing local HOTS news pipeline so users can 
   - `BOT_TOKEN` (required)
   - `GUILD_ID` (required)
   - `NEWS_CHANNEL_ID` (required)
-  - `DAILY_UPDATE_UTC_HOUR` (optional, default `15`)
-  - `DAILY_UPDATE_UTC_MINUTE` (optional, default `0`)
+  - `DAILY_UPDATE_CRON` (optional, default `0 15 * * *`)
 
 ## Message and UX Rules
 - Uses embeds for metadata (title, author, date, section, image).

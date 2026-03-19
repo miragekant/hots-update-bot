@@ -4,7 +4,7 @@ import asyncio
 import logging
 import sys
 from dataclasses import asdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 import discord
@@ -15,7 +15,7 @@ from discord.ext import tasks
 if __package__ is None or __package__ == "":
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from bot.config import BotConfig, load_config
+from bot.config import BotConfig, load_config, parse_cron_schedule
 from bot.heroesprofile_repository import HeroesProfileRepository
 from bot.message import (
     format_article_body_embed_pages,
@@ -56,10 +56,24 @@ class HotsClient(discord.Client):
         intents = discord.Intents.default()
         super().__init__(intents=intents)
         self.config = config
+        self.daily_update_schedule = parse_cron_schedule(config.daily_update_cron)
+        self.last_daily_update_minute: datetime | None = None
         self.tree = app_commands.CommandTree(self)
         self.repository = NewsRepository()
         self.heroesprofile_repository = HeroesProfileRepository()
         self.update_lock = asyncio.Lock()
+
+    def next_daily_update_after(self, now: datetime) -> datetime:
+        return self.daily_update_schedule.next_run_after(now)
+
+    def should_run_daily_update(self, now: datetime) -> bool:
+        current_minute = now.astimezone(timezone.utc).replace(second=0, microsecond=0)
+        if self.last_daily_update_minute == current_minute:
+            return False
+        if not self.daily_update_schedule.matches(current_minute):
+            return False
+        self.last_daily_update_minute = current_minute
+        return True
 
     async def setup_hook(self) -> None:
         guild = discord.Object(id=self.config.guild_id)
@@ -78,8 +92,11 @@ class HotsClient(discord.Client):
         view = ArticlePaginationView(article=article, requesting_user_id=None, page_chunks=pages)
         await channel.send(embed=view.current_embed(), view=view)
 
-    @tasks.loop(hours=24)
+    @tasks.loop(minutes=1)
     async def daily_update_task(self) -> None:
+        if not self.should_run_daily_update(datetime.now(timezone.utc)):
+            return
+
         if self.update_lock.locked():
             logger.info("daily update skipped because another update is running")
             return
@@ -110,14 +127,7 @@ class HotsClient(discord.Client):
     async def before_daily_update_task(self) -> None:
         await self.wait_until_ready()
         now = datetime.now(timezone.utc)
-        next_run = now.replace(
-            hour=self.config.daily_update_utc_hour,
-            minute=self.config.daily_update_utc_minute,
-            second=0,
-            microsecond=0,
-        )
-        if next_run <= now:
-            next_run += timedelta(days=1)
+        next_run = self.next_daily_update_after(now)
         delay_seconds = (next_run - now).total_seconds()
         logger.info("daily update loop ready; first run at %s", next_run.isoformat())
         await asyncio.sleep(delay_seconds)

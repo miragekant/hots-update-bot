@@ -19,7 +19,7 @@
 - Use local venv: `.venv`.
 - Install: `pip install -r requirements.txt`
 - Config comes from `.env`.
-- Bot env vars: `BOT_TOKEN`, `GUILD_ID`, `NEWS_CHANNEL_ID`, `DAILY_UPDATE_UTC_HOUR`, `DAILY_UPDATE_UTC_MINUTE`.
+- Bot env vars: `BOT_TOKEN`, `GUILD_ID`, `NEWS_CHANNEL_ID`, `DAILY_UPDATE_CRON`.
 
 ## Commands
 ```bash

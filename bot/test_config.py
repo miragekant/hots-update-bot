@@ -27,8 +27,7 @@ def _clear_env(monkeypatch):
         "BOT_TOKEN",
         "GUILD_ID",
         "NEWS_CHANNEL_ID",
-        "DAILY_UPDATE_UTC_HOUR",
-        "DAILY_UPDATE_UTC_MINUTE",
+        "DAILY_UPDATE_CRON",
         "GCP_PROJECT_ID",
     ):
         monkeypatch.delenv(name, raising=False)
@@ -45,8 +44,7 @@ def test_load_config_from_env(monkeypatch):
         bot_token="token",
         guild_id=123,
         news_channel_id=456,
-        daily_update_utc_hour=15,
-        daily_update_utc_minute=0,
+        daily_update_cron="0 15 * * *",
     )
 
 
@@ -71,8 +69,7 @@ def test_load_config_from_gcp(monkeypatch):
         bot_token="token",
         guild_id=123,
         news_channel_id=456,
-        daily_update_utc_hour=15,
-        daily_update_utc_minute=0,
+        daily_update_cron="0 15 * * *",
     )
 
 
@@ -97,6 +94,35 @@ def test_load_config_rejects_invalid_integer(monkeypatch):
 
     with pytest.raises(ValueError, match="invalid integer for GUILD_ID"):
         config.load_config()
+
+
+def test_load_config_accepts_custom_cron(monkeypatch):
+    monkeypatch.setenv("BOT_TOKEN", "token")
+    monkeypatch.setenv("GUILD_ID", "123")
+    monkeypatch.setenv("NEWS_CHANNEL_ID", "456")
+    monkeypatch.setenv("DAILY_UPDATE_CRON", "*/30 9-17 * * 1-5")
+
+    loaded = config.load_config()
+
+    assert loaded.daily_update_cron == "*/30 9-17 * * 1-5"
+
+
+def test_load_config_rejects_invalid_cron(monkeypatch):
+    monkeypatch.setenv("BOT_TOKEN", "token")
+    monkeypatch.setenv("GUILD_ID", "123")
+    monkeypatch.setenv("NEWS_CHANNEL_ID", "456")
+    monkeypatch.setenv("DAILY_UPDATE_CRON", "nope")
+
+    with pytest.raises(ValueError, match="DAILY_UPDATE_CRON"):
+        config.load_config()
+
+
+def test_parse_cron_schedule_next_run_after():
+    schedule = config.parse_cron_schedule("15 10 * * 1-5")
+
+    next_run = schedule.next_run_after(config.datetime(2026, 3, 20, 10, 15, tzinfo=config.timezone.utc))
+
+    assert next_run == config.datetime(2026, 3, 23, 10, 15, tzinfo=config.timezone.utc)
 
 
 def test_load_config_reports_missing_secret_manager_dependency(monkeypatch):

@@ -14,8 +14,7 @@
 - `BOT_TOKEN`
 - `GUILD_ID`
 - `NEWS_CHANNEL_ID`
-- `DAILY_UPDATE_UTC_HOUR`
-- `DAILY_UPDATE_UTC_MINUTE`
+- `DAILY_UPDATE_CRON`
 
 ## Implementation Steps
 1. Refactor config loading into source-specific helpers.

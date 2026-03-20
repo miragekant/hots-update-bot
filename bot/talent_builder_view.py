@@ -51,9 +51,10 @@ class TalentBuilderTierSelect(discord.ui.Select["TalentBuilderView"]):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         assert self.view is not None
-        self.view.active_level = self.values[0]
-        self.view.refresh_components()
-        await interaction.response.edit_message(embed=self.view.current_embed(), view=self.view)
+        view = self.view
+        view.active_level = self.values[0]
+        view.refresh_components()
+        await interaction.response.edit_message(embed=view.current_embed(), view=view)
 
 
 class TalentBuilderTalentSelect(discord.ui.Select["TalentBuilderView"]):
@@ -73,12 +74,13 @@ class TalentBuilderTalentSelect(discord.ui.Select["TalentBuilderView"]):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         assert self.view is not None
+        view = self.view
         if self.values[0] == "__none__":
             await interaction.response.send_message("No local talents are available for this tier.", ephemeral=True)
             return
-        self.view.selections[self.view.active_level] = int(self.values[0])
-        self.view.refresh_components()
-        await interaction.response.edit_message(embed=self.view.current_embed(), view=self.view)
+        view.selections[view.active_level] = int(self.values[0])
+        view.refresh_components()
+        await interaction.response.edit_message(embed=view.current_embed(), view=view)
 
 
 class TalentBuilderView(discord.ui.View):

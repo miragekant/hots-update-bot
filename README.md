@@ -61,8 +61,15 @@ python heroesprofile/update_data.py --workers 4 --verbose
 ```
 
 ## Run Discord Bot
-Create `.env` with:
+Create `.env` from `.env.example`, then fill in the values you need:
+
 ```bash
+cp .env.example .env
+```
+
+For local env mode:
+```bash
+BOT_CONFIG_SOURCE=env
 BOT_TOKEN=your_discord_bot_token
 GUILD_ID=123456789012345678
 NEWS_CHANNEL_ID=123456789012345678
@@ -73,6 +80,19 @@ Start bot:
 ```bash
 python bot/run.py
 ```
+
+Manual cache update:
+```bash
+./scripts/update_cache.sh
+./scripts/update_cache.sh news --months 3
+./scripts/update_cache.sh heroes --only heroes,talents
+```
+
+## Run With systemd (Debian)
+Debian supports `systemd` directly, so a user service is a good way to keep the bot running and restart it automatically.
+
+Setup notes and an example unit file are documented separately in:
+- `plans/discord/systemd-service-setup.md`
 
 For GCP Secret Manager-backed config, keep only the source selector and project id in the environment:
 ```bash
@@ -87,6 +107,15 @@ Expected Secret Manager secret names:
 - `DAILY_UPDATE_CRON` (optional, defaults to `0 15 * * *`)
 
 This keeps Discord command/runtime reads local while moving bot credentials and schedule config out of `.env`. Authentication for Secret Manager uses standard Google Cloud application default credentials.
+
+Optional bootstrap controls for service startup:
+```bash
+BOOTSTRAP_SYNC_ON_EMPTY=true
+BOOTSTRAP_SYNC_FORCE=false
+BOOTSTRAP_SYNC_SKIP=false
+```
+
+By default, the `systemd` startup path runs a one-time cache bootstrap only if `news/index.json` or `heroesprofile/manifest.json` is missing.
 
 Behavior:
 - `/latest` shows latest local article in a rich embed with Prev/Next buttons for article pages.

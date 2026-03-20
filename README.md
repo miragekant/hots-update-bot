@@ -116,6 +116,7 @@ BOOTSTRAP_SYNC_SKIP=false
 ```
 
 By default, the `systemd` startup path runs a one-time cache bootstrap only if `news/index.json` or `heroesprofile/manifest.json` is missing.
+If `.venv` is missing when `scripts/start_bot.sh` or `scripts/update_cache.sh` runs, the scripts create it with `python3` and install `requirements.txt` before continuing.
 
 Behavior:
 - `/latest` shows latest local article in a rich embed with Prev/Next buttons for article pages.

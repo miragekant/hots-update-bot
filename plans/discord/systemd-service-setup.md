@@ -50,6 +50,7 @@ WantedBy=default.target
 Adjust the paths if the repository lives somewhere else.
 
 The startup script can:
+- create `.venv` and install `requirements.txt` automatically when the virtualenv is missing
 - bootstrap local cache on first run if required files are missing
 - skip bootstrap when cache already exists
 - start the bot only after the bootstrap decision completes

@@ -30,6 +30,7 @@ pip install -r requirements.txt
 .venv/bin/python news/update_news.py
 ./news/run_update_news.sh
 .venv/bin/python bot/run.py
+./scripts/run_tests.sh
 ```
 
 ## Change Rules

@@ -88,6 +88,11 @@ Manual cache update:
 ./scripts/update_cache.sh heroes --only heroes,talents
 ```
 
+Run all tests:
+```bash
+./scripts/run_tests.sh
+```
+
 ## Run With systemd (Debian)
 Debian supports `systemd` directly, so a user service is a good way to keep the bot running and restart it automatically.
 
@@ -135,6 +140,7 @@ Behavior:
 ## Run Tests
 ```bash
 python -m pytest -q
+./scripts/run_tests.sh
 ```
 
 ## Plans

@@ -186,3 +186,88 @@ def test_update_news_logs_summary_and_stores_chronological_paths(monkeypatch, tm
     saved_index = upd.load_index(index_path)
     by_id = {item["news_id"]: item for item in saved_index["articles"]}
     assert "/2024/01/01/0900.json" in by_id["0900"]["article_path"]
+    assert stats.new_news_ids == ["0900"]
+
+
+def test_update_news_update_only_run_returns_no_new_ids(monkeypatch, tmp_path: Path):
+    index_path = tmp_path / "index.json"
+    article_dir = tmp_path / "articles"
+    index_path.write_text(
+        """
+{
+  "generated_at": "2026-01-01T00:00:00Z",
+  "count": 1,
+  "articles": [
+    {
+      "news_id": "1001",
+      "url": "https://news.blizzard.com/en-us/article/1001/article",
+      "title": "Existing",
+      "timestamp": "2025-09-30T17:11:00Z",
+      "updated_at": "2025-09-30T17:11:00Z",
+      "section": "latest",
+      "article_path": "news/articles/2025/09/30/1001.json"
+    }
+  ]
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    candidates = [
+        upd.ArticleMeta(
+            news_id="1001",
+            url="https://news.blizzard.com/en-us/article/1001/article",
+            title="Existing",
+            description="",
+            section="latest",
+            timestamp="2025-10-01T17:11:00Z",
+            image_url=None,
+        ),
+    ]
+    monkeypatch.setattr(upd, "discover_all_article_meta", lambda start_dt=None: candidates)
+    monkeypatch.setattr(upd, "fetch_article_html", lambda _url: ARTICLE_HTML)
+
+    start = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    end = datetime(2025, 12, 31, tzinfo=timezone.utc)
+
+    stats = upd.update_news(index_path=index_path, article_dir=article_dir, start_dt=start, end_dt=end)
+
+    assert stats.new == 0
+    assert stats.updated == 1
+    assert stats.new_news_ids == []
+
+
+def test_update_news_multiple_new_articles_preserves_discovery_order(monkeypatch, tmp_path: Path):
+    index_path = tmp_path / "index.json"
+    article_dir = tmp_path / "articles"
+
+    candidates = [
+        upd.ArticleMeta(
+            news_id="1001",
+            url="https://news.blizzard.com/en-us/article/1001/article",
+            title="First",
+            description="",
+            section="latest",
+            timestamp="2025-09-29T17:11:00Z",
+            image_url=None,
+        ),
+        upd.ArticleMeta(
+            news_id="1002",
+            url="https://news.blizzard.com/en-us/article/1002/article",
+            title="Second",
+            description="",
+            section="latest",
+            timestamp="2025-09-30T17:11:00Z",
+            image_url=None,
+        ),
+    ]
+    monkeypatch.setattr(upd, "discover_all_article_meta", lambda start_dt=None: candidates)
+    monkeypatch.setattr(upd, "fetch_article_html", lambda _url: ARTICLE_HTML)
+
+    start = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    end = datetime(2025, 12, 31, tzinfo=timezone.utc)
+
+    stats = upd.update_news(index_path=index_path, article_dir=article_dir, start_dt=start, end_dt=end)
+
+    assert stats.new == 2
+    assert stats.new_news_ids == ["1001", "1002"]

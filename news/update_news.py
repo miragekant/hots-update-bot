@@ -7,7 +7,7 @@ import logging
 import re
 import sys
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -74,6 +74,7 @@ class UpdateStats:
     updated: int = 0
     unchanged: int = 0
     failed: int = 0
+    new_news_ids: list[str] = field(default_factory=list)
 
 
 def configure_logging(verbose: bool = False) -> None:
@@ -439,6 +440,7 @@ def update_news(
                 logger.info("[%s/%s] updated news_id=%s", i, len(candidates), meta.news_id)
             else:
                 stats.new += 1
+                stats.new_news_ids.append(meta.news_id)
                 logger.info("[%s/%s] new news_id=%s", i, len(candidates), meta.news_id)
         except Exception as exc:
             stats.failed += 1

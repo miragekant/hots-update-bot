@@ -92,6 +92,16 @@ class HotsClient(discord.Client):
         view = ArticlePaginationView(article=article, requesting_user_id=None, page_chunks=pages)
         await channel.send(embed=view.current_embed(), view=view)
 
+    def _sort_articles_oldest_first(self, articles: list[dict]) -> list[dict]:
+        def _timestamp_key(article: dict) -> datetime:
+            raw = str(article.get("timestamp") or "")
+            try:
+                return datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone(timezone.utc)
+            except ValueError:
+                return datetime.max.replace(tzinfo=timezone.utc)
+
+        return sorted(articles, key=_timestamp_key)
+
     @tasks.loop(minutes=1)
     async def daily_update_task(self) -> None:
         if not self.should_run_daily_update(datetime.now(timezone.utc)):
@@ -115,13 +125,19 @@ class HotsClient(discord.Client):
             await channel.send(
                 f"Daily HOTS sync complete. New: {stats.new}, Updated: {stats.updated}, Unchanged: {stats.unchanged}, Failed: {stats.failed}"
             )
-            latest = self.repository.get_latest_article()
-            if latest is None:
+            if stats.new <= 0:
                 return
-            full_article = self.repository.get_article_by_news_id(str(latest.get("news_id")))
-            if full_article is None:
-                return
-            await self.send_article_to_channel(channel, full_article)
+
+            new_articles: list[dict] = []
+            for news_id in stats.new_news_ids:
+                full_article = self.repository.get_article_by_news_id(news_id)
+                if full_article is None:
+                    logger.warning("missing cached article for new news_id=%s after sync", news_id)
+                    continue
+                new_articles.append(full_article)
+
+            for article in self._sort_articles_oldest_first(new_articles):
+                await self.send_article_to_channel(channel, article)
 
     @daily_update_task.before_loop
     async def before_daily_update_task(self) -> None:
